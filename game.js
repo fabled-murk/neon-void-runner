@@ -14,7 +14,7 @@ const COLORS = {
 // STATE
 let gameState = 'menu';
 let level = 1, score = 0, hiScore = parseInt(localStorage.getItem('nvHi') || '0');
-let enemiesKilled = 0, enemiesNeeded = 8;
+let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 8;
 let bossActive = false, boss = null;
 let screenShake = 0, transitionTimer = 0, warningTimer = 0, spawnTimer = 0;
 let particles = [], pickups = [], enemyBullets = [];
@@ -235,6 +235,7 @@ function pickWeightedEnemy(pool) {
 
 // ENEMIES
 function spawnEnemy() {
+  if (enemiesSpawned >= enemiesNeeded) return; // Don't over-spawn
   const pool=getLevelEnemyPool(level), typeKey=pickWeightedEnemy(pool), def=ENEMY_TYPES[typeKey];
   const hpScale=1+Math.floor((level-1)/2)*0.3, spdScale=1+(level-1)*0.08;
   const originY=40+Math.random()*(H-80);
@@ -244,6 +245,7 @@ function spawnEnemy() {
     fireCooldown:Math.random()*(def.fireRate||60),aimed:def.aimed||false,
     score:Math.ceil(def.score*(1+level*0.1)),t:Math.random()*100,originY:originY,
     amp:def.amp||0,freq:def.freq||0,zigDir:1,type:typeKey});
+  enemiesSpawned++;
 }
 function updateEnemies() {
   for (let i=enemies.length-1;i>=0;i--) {
@@ -260,7 +262,7 @@ function updateEnemies() {
       if(e.aimed&&player){const a=Math.atan2(player.y-e.y,player.x-e.x);enemyBullets.push({x:e.x-e.w/2,y:e.y,vx:Math.cos(a)*5,vy:Math.sin(a)*5,size:3,color:e.color,damage:1});}
       else{enemyBullets.push({x:e.x-e.w/2,y:e.y,vx:-5,vy:0,size:3,color:e.color,damage:1});}}}
     e.y=Math.max(10,Math.min(H-10,e.y));
-    if(e.x<-50) enemies.splice(i,1);
+    if(e.x<-50) { enemies.splice(i,1); enemiesKilled++; }
   }
 }
 function drawEnemy(e) {
@@ -395,7 +397,7 @@ function checkCollisions() {
         if (boss.hp<=0) {
           score+=500+level*50; spawnParticle(boss.x,boss.y,boss.color,50,8,40); screenShake=20;
           for(let d=0;d<3;d++){const types=Object.keys(WEAPON_DEFS);pickups.push({x:boss.x+(Math.random()-0.5)*100,y:boss.y+(Math.random()-0.5)*100,w:18,h:18,type:types[Math.floor(Math.random()*types.length)],t:0,life:600});}
-          boss=null; bossActive=false; transitionTimer=90;
+          boss=null; bossActive=false; enemiesSpawned=0; enemiesKilled=0; transitionTimer=90;
         }
       }
     }
@@ -437,19 +439,21 @@ function updateSpawning() {
     if (transitionTimer===0) { upgradeOptions=generateUpgradeOptions(); gameState='upgradeScreen'; }
     return;
   }
-  spawnTimer--;
-  if (spawnTimer<=0) {
-    spawnTimer = Math.max(15, 50-level*2);
-    const waveSize = Math.min(5, 1+Math.floor(level/3));
-    for (let i=0;i<waveSize;i++) spawnEnemy();
+  if (enemiesSpawned < enemiesNeeded) {
+    spawnTimer--;
+    if (spawnTimer<=0) {
+      spawnTimer = Math.max(15, 50-level*2);
+      const waveSize = Math.min(5, 1+Math.floor(level/3));
+      for (let i=0;i<waveSize;i++) spawnEnemy();
+    }
   }
-  if (enemiesKilled>=enemiesNeeded && enemies.length===0 && enemyBullets.length===0) {
+  if (enemiesSpawned>=enemiesNeeded && enemies.length===0 && enemyBullets.length===0) {
     const nextLevel = level+1;
     if (nextLevel%10===0) {
-      level=nextLevel; enemiesKilled=0; enemiesNeeded=0;
+      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; enemiesNeeded=0;
       bossActive=true; boss=createBoss(); warningTimer=120; gameState='bossWarning';
     } else {
-      level=nextLevel; enemiesKilled=0; enemiesNeeded=Math.min(30,8+level*2);
+      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; enemiesNeeded=Math.min(30,8+level*2);
       transitionTimer=60;
     }
   }
@@ -521,7 +525,7 @@ function drawHUD() {
   drawNeonText('SCORE: '+score,W-15,20,14,COLORS.yellow,'right');
   drawNeonText('HI: '+hiScore,W-15,40,10,COLORS.orange,'right');
   drawNeonText('LVL '+level,W/2,20,16,COLORS.cyan);
-  if (!bossActive){const rem=Math.max(0,enemiesNeeded-enemiesKilled);drawNeonText('ENEMIES: '+rem,W/2,H-20,12,COLORS.red);}
+  if (!bossActive){drawNeonText('ENEMIES: '+enemiesKilled+'/'+enemiesNeeded,W/2,H-20,12,COLORS.red);}
   else if (boss) drawNeonText('BOSS',W/2,H-20,12,COLORS.red);
   drawNeonText('WEAPONS',15,H-60,10,COLORS.green,'left');
   for (let i=0;i<player.weapons.length;i++){const w=player.weapons[i];drawNeonText(w.name,15,H-45+i*14,10,w.color,'left');}
@@ -568,7 +572,7 @@ function drawShipSelect() {
   }
   if (mouseClicked && shipHoverIdx>=0) {
     player=createPlayer(shipHoverIdx);
-    level=1;score=0;enemiesKilled=0;enemiesNeeded=8;bossActive=false;boss=null;
+    level=1;score=0;enemiesKilled=0;enemiesSpawned=0;enemiesNeeded=8;bossActive=false;boss=null;
     bullets=[];enemies=[];enemyBullets=[];pickups=[];particles=[];spawnTimer=0;transitionTimer=0;
     gameState='playing';
   }
