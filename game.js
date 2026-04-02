@@ -14,30 +14,103 @@ const COLORS = {
 // STATE
 let gameState = 'menu';
 let level = 1, score = 0, hiScore = parseInt(localStorage.getItem('nvHi') || '0');
-let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 8;
+let credits = 0;
+let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 12;
 let bossActive = false, boss = null;
 let screenShake = 0, transitionTimer = 0, warningTimer = 0, spawnTimer = 0;
 let particles = [], pickups = [], enemyBullets = [];
 let stars = [], nebulae = [], bullets = [], enemies = [];
 let player = null, upgradeOptions = [], selectedUpgrade = -1, shipHoverIdx = -1;
 let frameCt = 0;
+let creditPopups = [];
+
+// ============================================
+// PROCEDURAL AMBIENT SCI-FI BOSSA NOVA MUSIC
+// ============================================
+let audioCtx = null, musicPlaying = false, musicGain = null, musicMuted = false;
+
+const BOSSA_CHORDS = [
+  [62,65,69,72,76],[55,59,62,65,69],[60,64,67,71,74],[57,60,64,67,71],
+  [65,68,72,75,79],[58,62,65,68,72],[63,67,70,74,77],[60,63,67,70,74],
+  [62,65,69,72,76],[55,58,62,65,69],[60,64,67,71,76],[57,60,64,69,72]
+];
+const BOSSA_RHYTHM = [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0];
+const BOSSA_BASS_RHYTHM = [1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0];
+
+function midiToFreq(m){return 440*Math.pow(2,(m-69)/12);}
+
+function initAudio(){
+  if(audioCtx)return;
+  try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();musicGain=audioCtx.createGain();musicGain.gain.value=0.35;musicGain.connect(audioCtx.destination);}catch(e){return;}
+}
+function startMusic(){
+  if(!audioCtx||musicPlaying)return;musicPlaying=true;scheduleBossa();
+}
+function scheduleBossa(){
+  if(!audioCtx||!musicPlaying)return;
+  const bpm=130,sixD=60/bpm/4,barD=sixD*16,now=audioCtx.currentTime;
+  for(let bar=0;bar<4;bar++){
+    const ci=(Math.floor(now/barD)+bar)%BOSSA_CHORDS.length,chord=BOSSA_CHORDS[ci],bs=now+bar*barD;
+    playPad(chord,bs,barD);
+    for(let s=0;s<16;s++){if(BOSSA_RHYTHM[s])playBossaChord(chord,bs+s*sixD,sixD*2.5);}
+    for(let s=0;s<16;s++){if(BOSSA_BASS_RHYTHM[s])playBass(chord[0]-12,bs+s*sixD,sixD*3);}
+    if(Math.random()<0.6)playMelody(chord,bs+(Math.floor(Math.random()*4))*sixD*4,sixD);
+    for(let s=0;s<16;s++){if(s%2===0||Math.random()<0.3)playShaker(bs+s*sixD,sixD*0.5,(s%4===0)?0.08:(s%2===0)?0.04:0.02);}
+  }
+  setTimeout(()=>scheduleBossa(),(barD*3.5)*1000);
+}
+function playPad(chord,time,dur){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(),f=audioCtx.createBiquadFilter();
+  f.type='lowpass';f.frequency.setValueAtTime(800,time);f.frequency.linearRampToValueAtTime(1800,time+dur*0.4);f.frequency.linearRampToValueAtTime(600,time+dur);f.Q.value=2;
+  f.connect(g);g.connect(musicGain);g.gain.setValueAtTime(0,time);g.gain.linearRampToValueAtTime(0.06,time+dur*0.3);g.gain.linearRampToValueAtTime(0.04,time+dur*0.8);g.gain.linearRampToValueAtTime(0,time+dur+0.5);
+  for(let i=2;i<chord.length;i++){const o1=audioCtx.createOscillator(),o2=audioCtx.createOscillator();o1.type='sine';o2.type='triangle';const fr=midiToFreq(chord[i]+12);o1.frequency.setValueAtTime(fr,time);o2.frequency.setValueAtTime(fr*1.003,time);o1.connect(f);o2.connect(f);o1.start(time);o2.start(time);o1.stop(time+dur+0.6);o2.stop(time+dur+0.6);}
+}
+function playBossaChord(chord,time,dur){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(),f=audioCtx.createBiquadFilter();f.type='bandpass';f.frequency.value=1200;f.Q.value=1.5;f.connect(g);g.connect(musicGain);
+  g.gain.setValueAtTime(0,time);g.gain.linearRampToValueAtTime(0.035,time+0.008);g.gain.exponentialRampToValueAtTime(0.008,time+dur);g.gain.linearRampToValueAtTime(0.001,time+dur+0.1);
+  for(let i=0;i<Math.min(4,chord.length);i++){const o=audioCtx.createOscillator();o.type='triangle';const sd=i*0.006;o.frequency.setValueAtTime(midiToFreq(chord[i]),time+sd);o.connect(f);o.start(time+sd);o.stop(time+dur+0.15);}
+}
+function playBass(note,time,dur){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(),f=audioCtx.createBiquadFilter();f.type='lowpass';f.frequency.value=400;f.Q.value=1;f.connect(g);g.connect(musicGain);
+  g.gain.setValueAtTime(0,time);g.gain.linearRampToValueAtTime(0.12,time+0.02);g.gain.exponentialRampToValueAtTime(0.03,time+dur*0.7);g.gain.linearRampToValueAtTime(0.001,time+dur);
+  const o=audioCtx.createOscillator();o.type='triangle';o.frequency.setValueAtTime(midiToFreq(note)*0.98,time);o.frequency.linearRampToValueAtTime(midiToFreq(note),time+0.05);o.connect(f);o.start(time);o.stop(time+dur+0.1);
+}
+function playMelody(chord,startTime,sixD){
+  if(!audioCtx)return;
+  const scale=[...chord,chord[0]+12,chord[1]+12,chord[2]-1,chord[3]+2],nc=3+Math.floor(Math.random()*4);
+  const g=audioCtx.createGain(),f=audioCtx.createBiquadFilter(),dl=audioCtx.createDelay(0.5),dg=audioCtx.createGain();
+  f.type='lowpass';f.frequency.value=3000;f.Q.value=0.5;f.connect(g);f.connect(dl);dl.delayTime.value=sixD*3;dl.connect(dg);dg.gain.value=0.25;dg.connect(g);g.connect(musicGain);g.gain.value=0.04;
+  for(let i=0;i<nc;i++){const t=startTime+i*sixD*(1+Math.floor(Math.random()*2)),note=scale[Math.floor(Math.random()*scale.length)]+12,dur=sixD*(1+Math.random()*2);const o=audioCtx.createOscillator();o.type=Math.random()<0.5?'sine':'triangle';o.frequency.setValueAtTime(midiToFreq(note),t);const ng=audioCtx.createGain();ng.gain.setValueAtTime(0,t);ng.gain.linearRampToValueAtTime(0.6,t+0.01);ng.gain.exponentialRampToValueAtTime(0.1,t+dur);ng.gain.linearRampToValueAtTime(0.001,t+dur+0.1);o.connect(ng);ng.connect(f);o.start(t);o.stop(t+dur+0.4);}
+}
+function playShaker(time,dur,vol){
+  if(!audioCtx)return;
+  const bs=audioCtx.sampleRate*dur,buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate),d=buf.getChannelData(0);for(let i=0;i<bs;i++)d[i]=Math.random()*2-1;
+  const src=audioCtx.createBufferSource();src.buffer=buf;const g=audioCtx.createGain(),f=audioCtx.createBiquadFilter();f.type='highpass';f.frequency.value=8000;src.connect(f);f.connect(g);g.connect(musicGain);g.gain.setValueAtTime(vol,time);g.gain.exponentialRampToValueAtTime(0.001,time+dur);src.start(time);src.stop(time+dur);
+}
+function playSFX(freq,type,dur,vol){
+  if(!audioCtx)return;const g=audioCtx.createGain();g.connect(audioCtx.destination);g.gain.setValueAtTime(vol||0.1,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+(dur||0.1));const o=audioCtx.createOscillator();o.type=type||'square';o.frequency.setValueAtTime(freq,audioCtx.currentTime);o.frequency.exponentialRampToValueAtTime(freq*0.5,audioCtx.currentTime+(dur||0.1));o.connect(g);o.start();o.stop(audioCtx.currentTime+(dur||0.1));
+}
+function toggleMusic(){if(!musicGain)return;musicMuted=!musicMuted;musicGain.gain.linearRampToValueAtTime(musicMuted?0:0.35,audioCtx.currentTime+0.3);}
 
 // INPUT
 const keys = {};
 window.addEventListener('keydown', e => {
   keys[e.key] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if (e.key === 'm' || e.key === 'M') toggleMusic();
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
-let mouseX = W/2, mouseY = H/2;
-let mouseClicked = false;
-let _pendingClick = false;
+let mouseX = W/2, mouseY = H/2, mouseClicked = false, _pendingClick = false;
 canvas.addEventListener('mousemove', e => {
   const r = canvas.getBoundingClientRect();
   mouseX = (e.clientX - r.left) * (W / r.width);
   mouseY = (e.clientY - r.top) * (H / r.height);
 });
-canvas.addEventListener('mousedown', () => { _pendingClick = true; });
+canvas.addEventListener('mousedown', () => { _pendingClick = true; initAudio(); startMusic(); });
+window.addEventListener('keydown', () => { initAudio(); startMusic(); }, { once: true });
 
 // SHIPS
 const SHIP_DEFS = [
@@ -71,16 +144,21 @@ const EVOLUTIONS = {
   'Tsunami Cannon': { name:'Gravity Wave',    damage:5,   fireRate:18, speed:9,  color:'#22ff22', pattern:'gravwave',  size:8 }
 };
 
-// ENEMY TYPES
+// UPGRADE COSTS - credits currency system
+const UPGRADE_COSTS = { evolve_t1:150, evolve_t2:400, repair:30, maxArmor:200, speed:120, slot:350 };
+const TIER1_NAMES = new Set(['Twin Laser','Spread-5','Homing Missile','Plasma Storm','Piercing Beam','Tsunami Cannon']);
+function getEvolveCost(wn){ return TIER1_NAMES.has(wn) ? UPGRADE_COSTS.evolve_t2 : UPGRADE_COSTS.evolve_t1; }
+
+// ENEMY TYPES - enemies now drop credits
 const ENEMY_TYPES = {
-  drone:     { name:'Drone',      w:24, h:20, hp:2, speed:2,   color:COLORS.red,     move:'straight', shoots:false, score:10 },
-  sine:      { name:'Wave Rider', w:26, h:18, hp:3, speed:2.5, color:COLORS.magenta, move:'sine',     shoots:false, score:20, amp:60, freq:0.04 },
-  strafer:   { name:'Strafer',    w:28, h:22, hp:4, speed:1.5, color:COLORS.yellow,  move:'strafeV',  shoots:true, fireRate:60, score:30 },
-  kamikaze:  { name:'Kamikaze',   w:20, h:16, hp:1, speed:5,   color:COLORS.orange,  move:'chase',    shoots:false, score:15 },
-  turret:    { name:'Turret',     w:30, h:30, hp:6, speed:0.5, color:COLORS.pink,    move:'slow',     shoots:true, fireRate:40, score:40 },
-  zigzag:    { name:'Zig Zagger', w:22, h:18, hp:3, speed:3,   color:'#ff8800',      move:'zigzag',   shoots:false, score:25 },
-  sniper:    { name:'Sniper',     w:26, h:20, hp:4, speed:1,   color:'#8800ff',      move:'slow',     shoots:true, fireRate:80, score:35, aimed:true },
-  swarmling: { name:'Swarmling',  w:16, h:14, hp:1, speed:3.5, color:'#00ff88',      move:'chase',    shoots:false, score:8 }
+  drone:     { name:'Drone',      w:24, h:20, hp:3,  speed:2,   color:COLORS.red,     move:'straight', shoots:false, score:10, credits:8 },
+  sine:      { name:'Wave Rider', w:26, h:18, hp:4,  speed:2.5, color:COLORS.magenta, move:'sine',     shoots:false, score:20, credits:12, amp:60, freq:0.04 },
+  strafer:   { name:'Strafer',    w:28, h:22, hp:5,  speed:1.5, color:COLORS.yellow,  move:'strafeV',  shoots:true, fireRate:60, score:30, credits:18 },
+  kamikaze:  { name:'Kamikaze',   w:20, h:16, hp:2,  speed:5,   color:COLORS.orange,  move:'chase',    shoots:false, score:15, credits:10 },
+  turret:    { name:'Turret',     w:30, h:30, hp:8,  speed:0.5, color:COLORS.pink,    move:'slow',     shoots:true, fireRate:40, score:40, credits:25 },
+  zigzag:    { name:'Zig Zagger', w:22, h:18, hp:4,  speed:3,   color:'#ff8800',      move:'zigzag',   shoots:false, score:25, credits:14 },
+  sniper:    { name:'Sniper',     w:26, h:20, hp:5,  speed:1,   color:'#8800ff',      move:'slow',     shoots:true, fireRate:80, score:35, credits:20, aimed:true },
+  swarmling: { name:'Swarmling',  w:16, h:14, hp:1,  speed:3.5, color:'#00ff88',      move:'chase',    shoots:false, score:8, credits:5 }
 };
 
 // HELPERS
@@ -106,6 +184,11 @@ function drawNeonText(text, x, y, size, color, align) {
   ctx.shadowBlur = 10; ctx.fillText(text, x, y); ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.5; ctx.fillText(text, x, y); ctx.restore();
 }
+
+// Credit popup system
+function spawnCreditPopup(x, y, amount) { creditPopups.push({x, y, amount, life:60, maxLife:60}); }
+function updateCreditPopups() { for(let i=creditPopups.length-1;i>=0;i--){creditPopups[i].y-=1;creditPopups[i].life--;if(creditPopups[i].life<=0)creditPopups.splice(i,1);} }
+function drawCreditPopups() { for(const p of creditPopups){const a=p.life/p.maxLife;ctx.save();ctx.globalAlpha=a;drawNeonText('+'+p.amount+'cr',p.x,p.y,12,COLORS.yellow);ctx.restore();} }
 
 // BACKGROUND
 function initStars() {
@@ -139,9 +222,13 @@ function drawShip(x, y, def, color, scale) {
   ctx.shadowColor = color; ctx.shadowBlur = 8; ctx.beginPath();
   if (def.shape==='sleek'){ctx.moveTo(22,0);ctx.lineTo(-12,-14);ctx.lineTo(-18,-10);ctx.lineTo(-16,0);ctx.lineTo(-18,10);ctx.lineTo(-12,14);}
   else if (def.shape==='heavy'){ctx.moveTo(18,0);ctx.lineTo(8,-16);ctx.lineTo(-14,-18);ctx.lineTo(-18,-12);ctx.lineTo(-18,12);ctx.lineTo(-14,18);ctx.lineTo(8,16);}
-  else {ctx.moveTo(20,0);ctx.lineTo(4,-12);ctx.lineTo(-6,-20);ctx.lineTo(-16,-16);ctx.lineTo(-14,0);ctx.lineTo(-16,16);ctx.lineTo(-6,20);ctx.lineTo(4,12);}
+  else{ctx.moveTo(20,0);ctx.lineTo(4,-18);ctx.lineTo(-10,-20);ctx.lineTo(-16,-14);ctx.lineTo(-14,0);ctx.lineTo(-16,14);ctx.lineTo(-10,20);ctx.lineTo(4,18);}
   ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = hexAlpha('#ffffff',0.6); ctx.fillRect(6,-3,6,6); ctx.shadowBlur = 0; ctx.restore();
+  ctx.shadowBlur=0; ctx.fillStyle=color; ctx.beginPath();
+  if(def.shape==='sleek'){ctx.arc(5,0,3,0,Math.PI*2);}
+  else if(def.shape==='heavy'){ctx.arc(0,0,4,0,Math.PI*2);}
+  else{ctx.arc(3,-6,2,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(3,6,2,0,Math.PI*2);}
+  ctx.fill(); ctx.restore();
 }
 
 // PLAYER
@@ -233,17 +320,19 @@ function pickWeightedEnemy(pool) {
   return pool[pool.length-1].type;
 }
 
-// ENEMIES
+// ENEMIES - slower scaling, more HP, credits on kill
 function spawnEnemy() {
-  if (enemiesSpawned >= enemiesNeeded) return; // Don't over-spawn
+  if (enemiesSpawned >= enemiesNeeded) return;
   const pool=getLevelEnemyPool(level), typeKey=pickWeightedEnemy(pool), def=ENEMY_TYPES[typeKey];
-  const hpScale=1+Math.floor((level-1)/2)*0.3, spdScale=1+(level-1)*0.08;
+  const hpScale=1+Math.floor((level-1)/3)*0.25, spdScale=1+(level-1)*0.05;
   const originY=40+Math.random()*(H-80);
+  const creditValue = Math.ceil(def.credits * (1 + level * 0.08));
   enemies.push({x:W+20,y:originY,w:def.w,h:def.h,hp:Math.ceil(def.hp*hpScale),maxHp:Math.ceil(def.hp*hpScale),
     speed:def.speed*spdScale,color:def.color,move:def.move,shoots:def.shoots,
-    fireRate:Math.max(10,Math.floor((def.fireRate||999)*(1-level*0.02))),
+    fireRate:Math.max(10,Math.floor((def.fireRate||999)*(1-level*0.015))),
     fireCooldown:Math.random()*(def.fireRate||60),aimed:def.aimed||false,
-    score:Math.ceil(def.score*(1+level*0.1)),t:Math.random()*100,originY:originY,
+    score:Math.ceil(def.score*(1+level*0.1)),credits:creditValue,
+    t:Math.random()*100,originY:originY,
     amp:def.amp||0,freq:def.freq||0,zigDir:1,type:typeKey});
   enemiesSpawned++;
 }
@@ -275,30 +364,31 @@ function drawEnemy(e) {
     case'strafer':ctx.rect(-e.w/2,-e.h/2,e.w,e.h);break;
     case'kamikaze':ctx.moveTo(e.w/2,0);ctx.lineTo(-e.w/2,-e.h/2);ctx.lineTo(-e.w/4,0);ctx.lineTo(-e.w/2,e.h/2);break;
     case'turret':ctx.arc(0,0,e.w/2,0,Math.PI*2);break;
-    case'zigzag':ctx.moveTo(-e.w/2,0);ctx.lineTo(-e.w/4,-e.h/2);ctx.lineTo(e.w/4,-e.h/3);ctx.lineTo(e.w/2,0);ctx.lineTo(e.w/4,e.h/3);ctx.lineTo(-e.w/4,e.h/2);break;
-    case'sniper':ctx.moveTo(-e.w/2,-e.h/2);ctx.lineTo(e.w/2,0);ctx.lineTo(-e.w/2,e.h/2);break;
+    case'zigzag':for(let p=0;p<6;p++){const a=p*Math.PI/3;ctx.lineTo(Math.cos(a)*e.w/2,Math.sin(a)*e.h/2);}break;
+    case'sniper':ctx.moveTo(e.w/2,0);ctx.lineTo(0,-e.h/2);ctx.lineTo(-e.w/2,0);ctx.lineTo(0,e.h/2);ctx.moveTo(e.w/2+8,0);ctx.lineTo(e.w/2,0);break;
     case'swarmling':ctx.arc(0,0,e.w/2,0,Math.PI*2);break;
     default:ctx.rect(-e.w/2,-e.h/2,e.w,e.h);
   }
   ctx.closePath(); ctx.fill(); ctx.stroke();
-  if (e.maxHp>1){ctx.shadowBlur=0;const bw=e.w;ctx.fillStyle='#333';ctx.fillRect(-bw/2,-e.h/2-6,bw,3);ctx.fillStyle=e.color;ctx.fillRect(-bw/2,-e.h/2-6,bw*(e.hp/e.maxHp),3);}
+  if (e.hp<e.maxHp){ctx.shadowBlur=0;const bw=e.w+4;ctx.fillStyle='#333';ctx.fillRect(-bw/2,-e.h/2-6,bw,3);ctx.fillStyle=e.color;ctx.fillRect(-bw/2,-e.h/2-6,bw*(e.hp/e.maxHp),3);}
   ctx.restore();
 }
 
 // ENEMY BULLETS
 function updateEnemyBullets() {
-  for (let i=enemyBullets.length-1;i>=0;i--){const b=enemyBullets[i];b.x+=b.vx;b.y+=b.vy;if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20)enemyBullets.splice(i,1);}
+  for(let i=enemyBullets.length-1;i>=0;i--){const b=enemyBullets[i];b.x+=b.vx;b.y+=b.vy;if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20)enemyBullets.splice(i,1);}
 }
 function drawEnemyBullets() {
-  for (const b of enemyBullets){ctx.save();ctx.shadowColor=b.color;ctx.shadowBlur=6;ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(b.x,b.y,b.size,0,Math.PI*2);ctx.fill();ctx.restore();}
+  for(const b of enemyBullets){ctx.save();ctx.fillStyle=b.color;ctx.shadowColor=b.color;ctx.shadowBlur=6;ctx.beginPath();ctx.arc(b.x,b.y,b.size,0,Math.PI*2);ctx.fill();ctx.restore();}
 }
 
 // BOSS
 function createBoss() {
   const bossLevel = Math.floor(level/10);
-  const colors = [COLORS.red,COLORS.magenta,COLORS.orange,'#ff00aa','#aa00ff'];
-  return {x:W+60,y:H/2,w:70+bossLevel*5,h:60+bossLevel*5,hp:40+bossLevel*20,maxHp:40+bossLevel*20,
-    speed:1.5,color:colors[bossLevel%colors.length],phase:0,t:0,fireTimer:0,attackPattern:0,patternTimer:0};
+  const colors = [COLORS.red, COLORS.magenta, COLORS.orange, '#ff00aa', '#aa00ff'];
+  return {x:W+60,y:H/2,w:70+bossLevel*5,h:60+bossLevel*5,hp:60+bossLevel*30,maxHp:60+bossLevel*30,
+    speed:1.5,color:colors[bossLevel%colors.length],phase:0,t:0,fireTimer:0,attackPattern:0,patternTimer:0,
+    credits:200+bossLevel*100};
 }
 function updateBoss() {
   if (!boss) return;
@@ -338,8 +428,8 @@ function drawBoss() {
 
 // PICKUPS
 function spawnPickup(x, y) {
-  if (Math.random()>0.25) return;
-  if (Math.random()<0.3) pickups.push({x,y,w:16,h:16,type:'health',t:0,life:480});
+  if (Math.random()>0.2) return;
+  if (Math.random()<0.4) pickups.push({x,y,w:16,h:16,type:'health',t:0,life:480});
   else { const types=Object.keys(WEAPON_DEFS); pickups.push({x,y,w:16,h:16,type:types[Math.floor(Math.random()*types.length)],t:0,life:480}); }
 }
 function updatePickups() {
@@ -353,6 +443,7 @@ function updatePickups() {
         if(!existing){if(player.weapons.length<player.weaponSlots)player.weapons.push({...wdef,cooldown:0});else player.weapons[player.weapons.length-1]={...wdef,cooldown:0};}
         spawnParticle(p.x,p.y,wdef.color,10,3,20);}}
       pickups.splice(i,1);
+      playSFX(880, 'sine', 0.15, 0.08);
     }
   }
 }
@@ -375,7 +466,7 @@ function drawParticles() {
   for (const p of particles){const a=p.life/p.maxLife;ctx.save();ctx.globalAlpha=a;ctx.fillStyle=p.color;ctx.shadowColor=p.color;ctx.shadowBlur=6;ctx.beginPath();ctx.arc(p.x,p.y,p.size*a,0,Math.PI*2);ctx.fill();ctx.restore();}
 }
 
-// COLLISIONS
+// COLLISIONS - enemies now award credits
 function checkCollisions() {
   if (!player) return;
   for (let bi=bullets.length-1;bi>=0;bi--) {
@@ -385,7 +476,13 @@ function checkCollisions() {
       if (Math.abs(b.x-e.x)<e.w/2+b.size && Math.abs(b.y-e.y)<e.h/2+b.size) {
         e.hp-=b.damage; spawnParticle(b.x,b.y,b.color,3,2,10);
         if (!b.pierce){bullets.splice(bi,1);hit=true;}
-        if (e.hp<=0){score+=e.score;enemiesKilled++;spawnParticle(e.x,e.y,e.color,20,5,30);spawnPickup(e.x,e.y);enemies.splice(ei,1);screenShake=5;}
+        if (e.hp<=0){
+          score+=e.score; credits+=e.credits; enemiesKilled++;
+          spawnParticle(e.x,e.y,e.color,20,5,30); spawnPickup(e.x,e.y);
+          spawnCreditPopup(e.x, e.y-15, e.credits);
+          enemies.splice(ei,1); screenShake=5;
+          playSFX(200,'sawtooth',0.2,0.08);
+        }
         break;
       }
     }
@@ -395,9 +492,12 @@ function checkCollisions() {
         boss.hp-=b2.damage; spawnParticle(b2.x,b2.y,b2.color,3,2,8);
         if (!b2.pierce) bullets.splice(bi,1);
         if (boss.hp<=0) {
-          score+=500+level*50; spawnParticle(boss.x,boss.y,boss.color,50,8,40); screenShake=20;
+          score+=500+level*50; credits+=boss.credits;
+          spawnParticle(boss.x,boss.y,boss.color,50,8,40); screenShake=20;
+          spawnCreditPopup(boss.x, boss.y-30, boss.credits);
           for(let d=0;d<3;d++){const types=Object.keys(WEAPON_DEFS);pickups.push({x:boss.x+(Math.random()-0.5)*100,y:boss.y+(Math.random()-0.5)*100,w:18,h:18,type:types[Math.floor(Math.random()*types.length)],t:0,life:600});}
           boss=null; bossActive=false; enemiesSpawned=0; enemiesKilled=0; transitionTimer=90;
+          playSFX(100,'sawtooth',0.5,0.15);
         }
       }
     }
@@ -408,6 +508,7 @@ function checkCollisions() {
       if (Math.abs(b.x-player.x)<18 && Math.abs(b.y-player.y)<14) {
         player.armor-=b.damage; player.invincible=30; player.shieldFlash=10;
         spawnParticle(b.x,b.y,COLORS.white,8,3,15); screenShake=4; enemyBullets.splice(i,1);
+        playSFX(150,'square',0.15,0.1);
         if (player.armor<=0){doGameOver();return;}
       }
     }
@@ -416,6 +517,7 @@ function checkCollisions() {
       if (Math.abs(e.x-player.x)<(e.w/2+18) && Math.abs(e.y-player.y)<(e.h/2+14)) {
         player.armor-=1; player.invincible=30; player.shieldFlash=10; screenShake=6;
         spawnParticle(e.x,e.y,e.color,15,4,20); enemies.splice(i,1); enemiesKilled++;
+        playSFX(150,'square',0.15,0.1);
         if (player.armor<=0){doGameOver();return;}
       }
     }
@@ -429,9 +531,10 @@ function doGameOver() {
   spawnParticle(player.x,player.y,player.color,40,6,40); screenShake=15;
   if (score>hiScore){hiScore=score;localStorage.setItem('nvHi',hiScore.toString());}
   gameState='gameOver';
+  playSFX(80,'sawtooth',0.8,0.15);
 }
 
-// SPAWNING / LEVEL PROGRESSION
+// SPAWNING / LEVEL PROGRESSION - slower progression
 function updateSpawning() {
   if (bossActive) return;
   if (transitionTimer>0) {
@@ -442,8 +545,8 @@ function updateSpawning() {
   if (enemiesSpawned < enemiesNeeded) {
     spawnTimer--;
     if (spawnTimer<=0) {
-      spawnTimer = Math.max(15, 50-level*2);
-      const waveSize = Math.min(5, 1+Math.floor(level/3));
+      spawnTimer = Math.max(20, 55-level*2);
+      const waveSize = Math.min(4, 1+Math.floor(level/4));
       for (let i=0;i<waveSize;i++) spawnEnemy();
     }
   }
@@ -453,28 +556,37 @@ function updateSpawning() {
       level=nextLevel; enemiesKilled=0; enemiesSpawned=0; enemiesNeeded=0;
       bossActive=true; boss=createBoss(); warningTimer=120; gameState='bossWarning';
     } else {
-      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; enemiesNeeded=Math.min(30,8+level*2);
+      level=nextLevel; enemiesKilled=0; enemiesSpawned=0;
+      enemiesNeeded=Math.min(40, 12+level*3);
       transitionTimer=60;
     }
   }
 }
 
-// UPGRADE SCREEN
+// UPGRADE SCREEN - now costs credits!
 function generateUpgradeOptions() {
   const opts = [];
   for (const w of player.weapons) {
-    if (EVOLUTIONS[w.name]) opts.push({type:'evolve',weapon:w,result:EVOLUTIONS[w.name],desc:'Evolve '+w.name+' -> '+EVOLUTIONS[w.name].name});
+    if (EVOLUTIONS[w.name]) {
+      const cost = getEvolveCost(w.name);
+      opts.push({type:'evolve',weapon:w,result:EVOLUTIONS[w.name],cost:cost,
+        desc:'Evolve '+w.name+' \u2192 '+EVOLUTIONS[w.name].name});
+    }
   }
-  if (player.armor<player.maxArmor) opts.push({type:'repair',desc:'Repair Armor (+'+Math.min(3,player.maxArmor-player.armor)+' HP)'});
-  opts.push({type:'maxArmor',desc:'Reinforce Hull (+1 Max Armor)'});
-  if (player.speed<12) opts.push({type:'speed',desc:'Thruster Upgrade (+0.5 Speed)'});
-  if (player.weaponSlots<4) opts.push({type:'slot',desc:'Add Weapon Slot (current: '+player.weaponSlots+')'});
-  // Shuffle
+  if (player.armor<player.maxArmor) {
+    const amt = Math.min(3,player.maxArmor-player.armor);
+    opts.push({type:'repair',cost:UPGRADE_COSTS.repair,desc:'Repair Armor (+'+amt+' HP)'});
+  }
+  opts.push({type:'maxArmor',cost:UPGRADE_COSTS.maxArmor,desc:'Reinforce Hull (+1 Max Armor)'});
+  if (player.speed<12) opts.push({type:'speed',cost:UPGRADE_COSTS.speed,desc:'Thruster Upgrade (+0.5 Speed)'});
+  if (player.weaponSlots<4) opts.push({type:'slot',cost:UPGRADE_COSTS.slot,desc:'Add Weapon Slot (current: '+player.weaponSlots+')'});
   for (let i=opts.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[opts[i],opts[j]]=[opts[j],opts[i]];}
   return opts.slice(0,3);
 }
 function applyUpgrade(idx) {
   const opt=upgradeOptions[idx]; if(!opt)return;
+  if (credits < opt.cost) return; // Can't afford!
+  credits -= opt.cost;
   switch(opt.type){
     case'evolve':{const wi=player.weapons.indexOf(opt.weapon);if(wi>=0)player.weapons[wi]={...opt.result,cooldown:0};break;}
     case'repair':player.armor=Math.min(player.maxArmor,player.armor+3);break;
@@ -482,29 +594,45 @@ function applyUpgrade(idx) {
     case'speed':player.speed=Math.min(12,player.speed+0.5);break;
     case'slot':player.weaponSlots=Math.min(4,player.weaponSlots+1);break;
   }
+  playSFX(660,'sine',0.2,0.1);
   gameState='playing';
 }
 function drawUpgradeScreen() {
   drawBackground();
   ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(0,0,W,H);
-  drawNeonText('LEVEL '+(level-1)+' COMPLETE!',W/2,70,34,COLORS.cyan);
-  drawNeonText('Entering Level '+level,W/2,110,18,COLORS.magenta);
-  drawNeonText('Choose an Upgrade:',W/2,155,20,COLORS.white);
-  const boxW=360,boxH=75,startY=190; selectedUpgrade=-1;
+  drawNeonText('LEVEL '+(level-1)+' COMPLETE!',W/2,50,34,COLORS.cyan);
+  drawNeonText('Entering Level '+level,W/2,85,18,COLORS.magenta);
+  drawNeonText('CREDITS: '+credits,W/2,120,22,COLORS.yellow);
+  drawNeonText('Choose an Upgrade:',W/2,155,18,COLORS.white);
+  const boxW=400,boxH=80,startY=180; selectedUpgrade=-1;
   for (let i=0;i<upgradeOptions.length;i++) {
-    const opt=upgradeOptions[i], bx=W/2-boxW/2, by=startY+i*(boxH+18);
+    const opt=upgradeOptions[i], bx=W/2-boxW/2, by=startY+i*(boxH+14);
     const hover=mouseX>=bx&&mouseX<=bx+boxW&&mouseY>=by&&mouseY<=by+boxH;
     if (hover) selectedUpgrade=i;
+    const canAfford = credits >= opt.cost;
     const col=opt.type==='evolve'?COLORS.magenta:opt.type==='repair'?COLORS.green:opt.type==='speed'?COLORS.cyan:opt.type==='slot'?COLORS.pink:COLORS.yellow;
-    ctx.strokeStyle=hover?'#ffffff':col; ctx.lineWidth=hover?3:1;
-    ctx.shadowColor=col; ctx.shadowBlur=hover?15:5;
-    ctx.fillStyle=hexAlpha(col,hover?0.2:0.05); ctx.fillRect(bx,by,boxW,boxH); ctx.strokeRect(bx,by,boxW,boxH); ctx.shadowBlur=0;
+    const dispCol = canAfford ? col : '#555555';
+    ctx.strokeStyle=hover&&canAfford?'#ffffff':dispCol; ctx.lineWidth=hover&&canAfford?3:1;
+    ctx.shadowColor=dispCol; ctx.shadowBlur=hover&&canAfford?15:5;
+    ctx.fillStyle=hexAlpha(dispCol,hover&&canAfford?0.2:0.05); ctx.fillRect(bx,by,boxW,boxH); ctx.strokeRect(bx,by,boxW,boxH); ctx.shadowBlur=0;
     const label=opt.type==='evolve'?'EVOLVE':opt.type==='repair'?'REPAIR':opt.type==='speed'?'SPEED':opt.type==='slot'?'SLOT':'ARMOR';
-    drawNeonText(label,W/2,by+26,18,col);
-    drawNeonText(opt.desc,W/2,by+52,12,COLORS.white);
+    drawNeonText(label,W/2-80,by+28,16,dispCol);
+    drawNeonText(opt.desc,W/2+20,by+28,11,canAfford?COLORS.white:'#666666');
+    const costCol = canAfford ? COLORS.yellow : COLORS.red;
+    drawNeonText(opt.cost+' cr',W/2+160,by+55,13,costCol);
+    if (!canAfford) drawNeonText('INSUFFICIENT',W/2-60,by+55,10,COLORS.red);
+    else if (hover) drawNeonText('[ CLICK TO BUY ]',W/2-60,by+55,10,'#ffffff');
   }
-  if (mouseClicked && selectedUpgrade>=0) applyUpgrade(selectedUpgrade);
-  drawNeonText('Score: '+score,W/2,H-40,14,COLORS.yellow);
+  if (mouseClicked && selectedUpgrade>=0 && credits>=upgradeOptions[selectedUpgrade].cost) applyUpgrade(selectedUpgrade);
+  // Skip button - always available
+  const skipY=startY+upgradeOptions.length*(boxH+14)+10;
+  const skipW=160,skipH=36,skipX=W/2-skipW/2;
+  const skipHover=mouseX>=skipX&&mouseX<=skipX+skipW&&mouseY>=skipY&&mouseY<=skipY+skipH;
+  ctx.strokeStyle=skipHover?'#fff':'#666';ctx.lineWidth=skipHover?2:1;
+  ctx.fillStyle=hexAlpha('#666666',skipHover?0.15:0.05);ctx.fillRect(skipX,skipY,skipW,skipH);ctx.strokeRect(skipX,skipY,skipW,skipH);
+  drawNeonText('SKIP (save credits)',W/2,skipY+18,11,skipHover?COLORS.white:'#888888');
+  if (mouseClicked&&skipHover) gameState='playing';
+  drawNeonText('Score: '+score,W/2,H-30,14,COLORS.yellow);
 }
 
 // BOSS WARNING
@@ -517,34 +645,40 @@ function drawBossWarning() {
   warningTimer--; if(warningTimer<=0) gameState='playing';
 }
 
-// HUD
+// HUD - now shows credits
 function drawHUD() {
   if (!player) return;
   drawNeonText('ARMOR',15,20,12,COLORS.cyan,'left');
   for (let i=0;i<player.maxArmor;i++){ctx.fillStyle=i<player.armor?COLORS.cyan:'#222';ctx.fillRect(15+i*14,28,10,10);ctx.strokeStyle=COLORS.cyan;ctx.lineWidth=1;ctx.strokeRect(15+i*14,28,10,10);}
   drawNeonText('SCORE: '+score,W-15,20,14,COLORS.yellow,'right');
   drawNeonText('HI: '+hiScore,W-15,40,10,COLORS.orange,'right');
+  drawNeonText('CREDITS: '+credits,W-15,58,12,COLORS.yellow,'right');
   drawNeonText('LVL '+level,W/2,20,16,COLORS.cyan);
   if (!bossActive){drawNeonText('ENEMIES: '+enemiesKilled+'/'+enemiesNeeded,W/2,H-20,12,COLORS.red);}
   else if (boss) drawNeonText('BOSS',W/2,H-20,12,COLORS.red);
   drawNeonText('WEAPONS',15,H-60,10,COLORS.green,'left');
   for (let i=0;i<player.weapons.length;i++){const w=player.weapons[i];drawNeonText(w.name,15,H-45+i*14,10,w.color,'left');}
+  // Music toggle hint
+  drawNeonText('[M] Music '+(musicMuted?'OFF':'ON'),W-15,H-15,9,musicMuted?'#555':COLORS.cyan,'right');
 }
 
-// PLAYER UPDATE
+// MENU
 function drawMenu() {
   drawBackground(); updateStars();
   const t=Date.now()*0.001;
-  drawNeonText('NEON VOID RUNNER',W/2,160,44,COLORS.cyan);
-  drawNeonText('SCI-FI SIDE SCROLLER',W/2,210,16,COLORS.magenta);
+  drawNeonText('NEON VOID RUNNER',W/2,140,44,COLORS.cyan);
+  drawNeonText('SCI-FI SIDE SCROLLER',W/2,190,16,COLORS.magenta);
+  drawNeonText('\u266b ambient scifi bossa nova \u266b',W/2,220,12,'#888888');
   const demoShip=SHIP_DEFS[Math.floor(t)%3];
-  drawShip(W/2+Math.sin(t*2)*30,320+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
-  const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=420;
+  drawShip(W/2+Math.sin(t*2)*30,310+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
+  const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=400;
   const hover=mouseX>=btnX&&mouseX<=btnX+btnW&&mouseY>=btnY&&mouseY<=btnY+btnH;
   ctx.strokeStyle=hover?'#fff':COLORS.cyan;ctx.lineWidth=hover?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=hover?20:10;
   ctx.fillStyle=hexAlpha(COLORS.cyan,hover?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
   drawNeonText('START GAME',W/2,btnY+25,20,COLORS.cyan);
-  drawNeonText('High Score: '+hiScore,W/2,520,14,COLORS.orange);
+  drawNeonText('High Score: '+hiScore,W/2,500,14,COLORS.orange);
+  drawNeonText('Click anywhere to start music',W/2,535,11,'#666666');
+  drawNeonText('[M] Toggle Music  |  WASD/Arrows to Move',W/2,560,10,'#555555');
   if (mouseClicked&&hover) gameState='shipSelect';
 }
 
@@ -572,8 +706,8 @@ function drawShipSelect() {
   }
   if (mouseClicked && shipHoverIdx>=0) {
     player=createPlayer(shipHoverIdx);
-    level=1;score=0;enemiesKilled=0;enemiesSpawned=0;enemiesNeeded=8;bossActive=false;boss=null;
-    bullets=[];enemies=[];enemyBullets=[];pickups=[];particles=[];spawnTimer=0;transitionTimer=0;
+    level=1;score=0;credits=0;enemiesKilled=0;enemiesSpawned=0;enemiesNeeded=12;bossActive=false;boss=null;
+    bullets=[];enemies=[];enemyBullets=[];pickups=[];particles=[];creditPopups=[];spawnTimer=0;transitionTimer=0;
     gameState='playing';
   }
 }
@@ -581,9 +715,10 @@ function drawShipSelect() {
 function drawGameOver() {
   drawBackground(); updateStars();
   ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,W,H);
-  drawNeonText('GAME OVER',W/2,H/2-60,48,COLORS.red);
-  drawNeonText('Score: '+score,W/2,H/2,24,COLORS.yellow);
-  drawNeonText('High Score: '+hiScore,W/2,H/2+40,18,COLORS.orange);
+  drawNeonText('GAME OVER',W/2,H/2-80,48,COLORS.red);
+  drawNeonText('Score: '+score,W/2,H/2-20,24,COLORS.yellow);
+  drawNeonText('Credits Earned: '+credits,W/2,H/2+15,16,COLORS.yellow);
+  drawNeonText('High Score: '+hiScore,W/2,H/2+45,18,COLORS.orange);
   drawNeonText('Level Reached: '+level,W/2,H/2+75,16,COLORS.cyan);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=H/2+110;
   const hover=mouseX>=btnX&&mouseX<=btnX+btnW&&mouseY>=btnY&&mouseY<=btnY+btnH;
@@ -593,10 +728,9 @@ function drawGameOver() {
   if (mouseClicked&&hover) gameState='shipSelect';
 }
 
-// MAIN LOOP - single loop, proper click handling
+// MAIN LOOP
 initStars();
 function gameLoop() {
-  // Handle click: true for exactly one frame
   mouseClicked = _pendingClick;
   _pendingClick = false;
   frameCt++;
@@ -607,15 +741,15 @@ function gameLoop() {
     case 'shipSelect': drawShipSelect(); break;
     case 'playing':
       updateStars(); updatePlayer(); updateBullets(); updateEnemies(); updateEnemyBullets();
-      updateBoss(); updatePickups(); updateParticles(); checkCollisions(); updateSpawning();
+      updateBoss(); updatePickups(); updateParticles(); updateCreditPopups(); checkCollisions(); updateSpawning();
       drawBackground(); drawPickups(); drawBullets(); drawEnemyBullets();
       for (const e of enemies) drawEnemy(e); drawBoss();
       if (player) {
-        if (player.invincible>0 && Math.floor(player.invincible/3)%2===0) {} 
+        if (player.invincible>0 && Math.floor(player.invincible/3)%2===0) {}
         else drawShip(player.x,player.y,SHIP_DEFS[player.shipIdx],player.color,1);
         if (player.shieldFlash>0) drawGlow(player.x,player.y,40,COLORS.white,0.3);
       }
-      drawParticles(); drawHUD(); break;
+      drawParticles(); drawCreditPopups(); drawHUD(); break;
     case 'upgradeScreen': drawUpgradeScreen(); break;
     case 'bossWarning': drawBossWarning(); break;
     case 'gameOver': drawGameOver(); break;
