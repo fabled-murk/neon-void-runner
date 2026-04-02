@@ -114,9 +114,9 @@ window.addEventListener('keydown', () => { initAudio(); startMusic(); }, { once:
 
 // SHIPS
 const SHIP_DEFS = [
-  { name:'PHANTOM', desc:'High speed, low armor', color:COLORS.cyan, speed:7, armor:3, maxArmor:3, weaponSlots:2, shape:'sleek' },
-  { name:'TITAN', desc:'Heavy armor, slow speed', color:COLORS.orange, speed:4, armor:8, maxArmor:8, weaponSlots:2, shape:'heavy' },
-  { name:'HYDRA', desc:'Extra weapon slot, balanced', color:COLORS.green, speed:5, armor:5, maxArmor:5, weaponSlots:3, shape:'wide' }
+  { name:'PHANTOM', desc:'High speed, low armor', color:COLORS.cyan, speed:4, armor:3, maxArmor:3, weaponSlots:2, shape:'sleek' },
+  { name:'TITAN', desc:'Heavy armor, slow speed', color:COLORS.orange, speed:2.5, armor:8, maxArmor:8, weaponSlots:2, shape:'heavy' },
+  { name:'HYDRA', desc:'Extra weapon slot, balanced', color:COLORS.green, speed:3, armor:5, maxArmor:5, weaponSlots:3, shape:'wide' }
 ];
 
 // WEAPONS
@@ -151,14 +151,14 @@ function getEvolveCost(wn){ return TIER1_NAMES.has(wn) ? UPGRADE_COSTS.evolve_t2
 
 // ENEMY TYPES - enemies now drop credits
 const ENEMY_TYPES = {
-  drone:     { name:'Drone',      w:24, h:20, hp:3,  speed:2,   color:COLORS.red,     move:'straight', shoots:false, score:10, credits:8 },
-  sine:      { name:'Wave Rider', w:26, h:18, hp:4,  speed:2.5, color:COLORS.magenta, move:'sine',     shoots:false, score:20, credits:12, amp:60, freq:0.04 },
-  strafer:   { name:'Strafer',    w:28, h:22, hp:5,  speed:1.5, color:COLORS.yellow,  move:'strafeV',  shoots:true, fireRate:60, score:30, credits:18 },
-  kamikaze:  { name:'Kamikaze',   w:20, h:16, hp:2,  speed:5,   color:COLORS.orange,  move:'chase',    shoots:false, score:15, credits:10 },
-  turret:    { name:'Turret',     w:30, h:30, hp:8,  speed:0.5, color:COLORS.pink,    move:'slow',     shoots:true, fireRate:40, score:40, credits:25 },
-  zigzag:    { name:'Zig Zagger', w:22, h:18, hp:4,  speed:3,   color:'#ff8800',      move:'zigzag',   shoots:false, score:25, credits:14 },
-  sniper:    { name:'Sniper',     w:26, h:20, hp:5,  speed:1,   color:'#8800ff',      move:'slow',     shoots:true, fireRate:80, score:35, credits:20, aimed:true },
-  swarmling: { name:'Swarmling',  w:16, h:14, hp:1,  speed:3.5, color:'#00ff88',      move:'chase',    shoots:false, score:8, credits:5 }
+  drone:     { name:'Drone',      w:24, h:20, hp:3,  speed:1.4,   color:COLORS.red,     move:'straight', shoots:false, score:10, credits:8 },
+  sine:      { name:'Wave Rider', w:26, h:18, hp:4,  speed:1.75, color:COLORS.magenta, move:'sine',     shoots:false, score:20, credits:12, amp:60, freq:0.04 },
+  strafer:   { name:'Strafer',    w:28, h:22, hp:5,  speed:1, color:COLORS.yellow,  move:'strafeV',  shoots:true, fireRate:60, score:30, credits:18 },
+  kamikaze:  { name:'Kamikaze',   w:20, h:16, hp:2,  speed:3.5,   color:COLORS.orange,  move:'chase',    shoots:false, score:15, credits:10 },
+  turret:    { name:'Turret',     w:30, h:30, hp:8,  speed:0.35, color:COLORS.pink,    move:'slow',     shoots:true, fireRate:40, score:40, credits:25 },
+  zigzag:    { name:'Zig Zagger', w:22, h:18, hp:4,  speed:2,   color:'#ff8800',      move:'zigzag',   shoots:false, score:25, credits:14 },
+  sniper:    { name:'Sniper',     w:26, h:20, hp:5,  speed:0.7,   color:'#8800ff',      move:'slow',     shoots:true, fireRate:80, score:35, credits:20, aimed:true },
+  swarmling: { name:'Swarmling',  w:16, h:14, hp:1,  speed:2.5, color:'#00ff88',      move:'chase',    shoots:false, score:8, credits:5 }
 };
 
 // HELPERS
