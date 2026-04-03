@@ -18,6 +18,7 @@ let credits = 0;
 let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 20;
 let bossActive = false, boss = null, bossMusicActive = false;
 let screenShake = 0, transitionTimer = 0, warningTimer = 0, spawnTimer = 0;
+let slowMoTimer = 0, slowMoFactor = 1;
 let particles = [], pickups = [], enemyBullets = [];
 let stars = [], nebulae = [], bullets = [], enemies = [];
 let player = null, upgradeOptions = [], selectedUpgrade = -1, shipHoverIdx = -1, upgradeHoverIdx = 0;
@@ -424,9 +425,9 @@ window.addEventListener('keydown', () => { initAudio(); startMusic(); }, { once:
 
 // SHIPS
 const SHIP_DEFS = [
-  { name:'PHANTOM', desc:'High speed, low armor', color:COLORS.cyan, speed:4, armor:3, maxArmor:3, weaponSlots:2, shape:'sleek' },
-  { name:'TITAN', desc:'Heavy armor, slow speed', color:COLORS.orange, speed:2.5, armor:8, maxArmor:8, weaponSlots:2, shape:'heavy' },
-  { name:'HYDRA', desc:'Extra weapon slot, balanced', color:COLORS.green, speed:3, armor:5, maxArmor:5, weaponSlots:3, shape:'wide' }
+  { name:'PHANTOM', desc:'High speed, low armor', color:COLORS.cyan, speed:2.4, armor:3, maxArmor:3, weaponSlots:2, shape:'sleek' },
+  { name:'TITAN', desc:'Heavy armor, slow speed', color:COLORS.orange, speed:1.5, armor:8, maxArmor:8, weaponSlots:2, shape:'heavy' },
+  { name:'HYDRA', desc:'Extra weapon slot, balanced', color:COLORS.green, speed:1.8, armor:5, maxArmor:5, weaponSlots:3, shape:'wide' }
 ];
 
 // WEAPONS
@@ -631,7 +632,22 @@ function updateBullets() {
     }
     if (b.waveAmp){b.waveT+=b.waveFreq;b.y+=Math.cos(b.waveT)*b.waveAmp*b.waveFreq;}
     b.x += b.vx; b.y += b.vy;
-    if (b.x>W+20||b.x<-20||b.y>H+20||b.y<-20) bullets.splice(i,1);
+    // Range check - remove bullets that exceeded their weapon range
+    const distX = b.x - b.startX, distY = b.y - b.startY;
+    const dist = Math.sqrt(distX*distX + distY*distY);
+    if (dist > (b.range||800) || b.x>W+20||b.x<-20||b.y>H+20||b.y<-20) {
+      // Grenade AOE explosion at max range
+      if (b.grenade && dist > (b.range||300)) {
+        const aoeR = b.aoe || 60;
+        spawnParticle(b.x, b.y, b.color, 15, 5, 20);
+        for (let ei=enemies.length-1;ei>=0;ei--){
+          const e=enemies[ei];
+          if(Math.hypot(e.x-b.x,e.y-b.y)<aoeR){e.hp-=b.damage*0.5;}
+        }
+        if(boss && Math.hypot(boss.x-b.x,boss.y-b.y)<aoeR) boss.hp-=b.damage*0.5;
+      }
+      bullets.splice(i,1);
+    }
   }
 }
 function drawBullets() {
@@ -765,7 +781,7 @@ function drawEnemyBullets() {
 function createBoss() {
   const bossLevel = Math.floor(level/10);
   const colors = [COLORS.red, COLORS.magenta, COLORS.orange, '#ff00aa', '#aa00ff'];
-  return {x:W+60,y:H/2,w:70+bossLevel*5,h:60+bossLevel*5,hp:60+bossLevel*30,maxHp:60+bossLevel*30,
+  return {x:W+60,y:H/2,w:70+bossLevel*5,h:60+bossLevel*5,hp:600+bossLevel*300,maxHp:600+bossLevel*300,
     speed:1.5,color:colors[bossLevel%colors.length],phase:0,t:0,fireTimer:0,attackPattern:0,patternTimer:0,
     credits:200+bossLevel*100};
 }
@@ -892,11 +908,34 @@ function checkCollisions() {
         if (!b2.pierce) bullets.splice(bi,1);
         if (boss.hp<=0) {
           score+=500+level*50; credits+=Math.ceil(boss.credits * comboMultiplier);
-          spawnParticle(boss.x,boss.y,boss.color,50,8,40); screenShake=20;
-          spawnCreditPopup(boss.x, boss.y-30, Math.ceil(boss.credits * comboMultiplier));
-          for(let d=0;d<3;d++){const types=Object.keys(WEAPON_DEFS);pickups.push({x:boss.x+(Math.random()-0.5)*100,y:boss.y+(Math.random()-0.5)*100,w:18,h:18,type:types[Math.floor(Math.random()*types.length)],t:0,life:600});}
+          // Epic slow-mo boss explosion
+          slowMoTimer = 90; slowMoFactor = 0.15;
+          screenShake=25;
+          // Store boss info for delayed explosion sequence
+          const bx=boss.x, by=boss.y, bc=boss.color, bw=boss.w, bh=boss.h;
+          const bossCredits = Math.ceil(boss.credits * comboMultiplier);
+          spawnCreditPopup(bx, by-30, bossCredits);
+          // Initial big explosion
+          for(let r=0;r<5;r++) {
+            const ox=(Math.random()-0.5)*bw, oy=(Math.random()-0.5)*bh;
+            spawnParticle(bx+ox,by+oy,bc,15,6,30);
+          }
+          // Ring of particles
+          for(let a=0;a<Math.PI*2;a+=Math.PI/8) {
+            particles.push({x:bx,y:by,vx:Math.cos(a)*4,vy:Math.sin(a)*4,color:bc,life:50,maxLife:50,size:4});
+          }
+          // Secondary ring
+          for(let a=Math.PI/16;a<Math.PI*2;a+=Math.PI/6) {
+            particles.push({x:bx,y:by,vx:Math.cos(a)*7,vy:Math.sin(a)*7,color:'#ffffff',life:35,maxLife:35,size:3});
+          }
+          // Core flash particles
+          spawnParticle(bx,by,'#ffffff',30,8,45);
+          spawnParticle(bx,by,bc,40,6,35);
+          // Weapon pickups
+          for(let d=0;d<3;d++){const types=Object.keys(WEAPON_DEFS);pickups.push({x:bx+(Math.random()-0.5)*100,y:by+(Math.random()-0.5)*100,w:18,h:18,type:types[Math.floor(Math.random()*types.length)],t:0,life:600});}
           boss=null; bossActive=false; bossMusicActive=false; enemiesSpawned=0; enemiesKilled=0; transitionTimer=90;
-          playSFX(100,'sawtooth',0.5,0.15);
+          playSFX(80,'sawtooth',0.8,0.2);
+          playSFX(40,'sine',1.2,0.15);
         }
       }
     }
@@ -1211,13 +1250,24 @@ function gameLoop() {
   _pendingClick = false;
   frameCt++;
   ctx.save();
-  if (screenShake>0){ctx.translate((Math.random()-0.5)*screenShake*2,(Math.random()-0.5)*screenShake*2);screenShake-=0.5;}
+  if (screenShake>0.3){ctx.translate((Math.random()-0.5)*screenShake*2,(Math.random()-0.5)*screenShake*2);screenShake*=0.82;} else { screenShake=0; }
   switch(gameState) {
     case 'menu': drawMenu(); break;
     case 'shipSelect': drawShipSelect(); break;
     case 'playing':
-      updateStars(); updatePlayer(); updateBullets(); updateEnemies(); updateEnemyBullets();
-      updateBoss(); updatePickups(); updateParticles(); updateCreditPopups(); checkCollisions(); updateSpawning();
+      // Slow-mo effect (boss death)
+      if (slowMoTimer > 0) {
+        slowMoTimer--;
+        slowMoFactor = 0.15 + (1-0.15) * (1 - slowMoTimer/90); // ease back to normal
+        if (slowMoTimer <= 0) slowMoFactor = 1;
+      }
+      const doUpdate = slowMoFactor >= 1 || Math.random() < slowMoFactor;
+      if (doUpdate) {
+        updateStars(); updatePlayer(); updateBullets(); updateEnemies(); updateEnemyBullets();
+        updateBoss(); updatePickups(); checkCollisions(); updateSpawning();
+      }
+      // Always update visual effects (particles look great in slow-mo)
+      updateParticles(); updateCreditPopups();
       drawBackground(); drawPickups(); drawBullets(); drawEnemyBullets();
       for (const e of enemies) drawEnemyWithHP(e); drawBoss();
       if (player) {
@@ -1225,7 +1275,23 @@ function gameLoop() {
         else drawShip(player.x,player.y,SHIP_DEFS[player.shipIdx],player.color,1);
         if (player.shieldFlash>0) drawGlow(player.x,player.y,40,COLORS.white,0.3);
       }
-      drawParticles(); drawCreditPopups(); drawHUD(); break;
+      drawParticles(); drawCreditPopups(); drawHUD();
+      // Slow-mo visual overlay
+      if (slowMoTimer > 0) {
+        const intensity = slowMoTimer/90;
+        // White flash on initial frames
+        if (slowMoTimer > 80) {
+          ctx.fillStyle = 'rgba(255,255,255,' + ((slowMoTimer-80)/10)*0.4 + ')';
+          ctx.fillRect(-50,-50,W+100,H+100);
+        }
+        // Vignette during slow-mo
+        const grad = ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.8);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,' + intensity*0.5 + ')');
+        ctx.fillStyle = grad;
+        ctx.fillRect(-50,-50,W+100,H+100);
+      }
+      break;
     case 'upgradeScreen': drawUpgradeScreen(); break;
     case 'bossWarning': drawBossWarning(); break;
     case 'gameOver': drawGameOver(); break;
