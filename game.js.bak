@@ -15,7 +15,7 @@ const COLORS = {
 let gameState = 'menu';
 let level = 1, score = 0, hiScore = parseInt(localStorage.getItem('nvHi') || '0');
 let credits = 0;
-let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 20;
+let enemiesKilled = 0, enemiesSpawned = 0, enemiesNeeded = 12;
 let bossActive = false, boss = null, bossMusicActive = false;
 let screenShake = 0, transitionTimer = 0, warningTimer = 0, spawnTimer = 0;
 let particles = [], pickups = [], enemyBullets = [];
@@ -28,295 +28,277 @@ let menuBtnSelected = true, gameOverBtnSelected = true;
 // ============================================
 // ============================================
 // DRUM & BASS SOUNDTRACK
-// Procedural synthesized audio - clean Ambient: deep sub bass, amen breaks, atmospheric pads
+// Procedural synthesized audio - clean DnB: deep sub bass, amen breaks, atmospheric pads
 // Boss levels switch to faster, more energetic tempo
 // ============================================
 let audioCtx = null, musicPlaying = false, musicGain = null, musicMuted = false;
 let compressor = null;
 
-// Dark Ambient chord progressions - minor keys, lots of tension
-
-// === AMBIENT SOUNDTRACK SYSTEM ===
-// Ethereal ambient pads that evolve with gameplay intensity
-const AMBIENT_CHORDS = [
-  [36, 43, 48, 55, 60, 67],  // C minor spread voicing
-  [34, 41, 46, 53, 58, 65],  // Bb minor
-  [31, 38, 43, 50, 55, 62],  // G minor
-  [33, 40, 45, 52, 57, 64],  // A minor
-  [29, 36, 41, 48, 53, 60],  // F minor
-  [36, 43, 48, 55, 60, 64],  // C minor (bright)
+// Dark DnB chord progressions - minor keys, lots of tension
+const DNB_CHORDS = [
+  [36,39,43,46],[31,34,38,41],[34,37,41,44],[29,32,36,39],
+  [32,35,39,42],[27,30,34,37],[35,38,42,45],[30,33,37,40]
 ];
+const DNB_BASS_NOTES = [24,26,28,23,25,21,26,24];
 
-const BOSS_CHORDS = [
-  [36, 42, 48, 54, 60, 66],  // C diminished spread
-  [34, 40, 46, 52, 58, 64],  // Bb diminished
-  [33, 39, 45, 51, 57, 63],  // A diminished
-  [31, 37, 43, 49, 55, 61],  // G diminished
-];
+function midiToFreq(m){return 440*Math.pow(2,(m-69)/12);}
 
-let ambientPhase = 0;
-let ambientIntensity = 0; // 0-1, ramps up during boss
-let comboMultiplier = 1;
-let comboTimer = 0;
-let comboCount = 0;
-let maxCombo = 0;
+function initAudio(){
+  if(audioCtx)return;
+  try{
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    // Master compressor for that punchy DnB sound
+    compressor=audioCtx.createDynamicsCompressor();
+    compressor.threshold.value=-24; compressor.knee.value=12;
+    compressor.ratio.value=8; compressor.attack.value=0.003; compressor.release.value=0.15;
+    musicGain=audioCtx.createGain(); musicGain.gain.value=0.45;
+    musicGain.connect(compressor); compressor.connect(audioCtx.destination);
+  }catch(e){return;}
+}
+function startMusic(){
+  if(!audioCtx||musicPlaying)return; musicPlaying=true; scheduleDNB();
+}
 
-function scheduleAmbient(){
+// Amen break style kick/snare patterns (16th note grid)
+const AMEN_KICK =  [1,0,0,0, 0,0,1,0, 0,1,0,0, 0,0,0,0];
+const AMEN_SNARE = [0,0,0,0, 1,0,0,1, 0,0,0,0, 1,0,0,1];
+const AMEN_HAT =   [1,0,1,1, 1,0,1,0, 1,1,1,0, 1,0,1,1];
+
+// Boss mode - double-time aggression
+const BOSS_KICK =  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0];
+const BOSS_SNARE = [0,0,1,0, 0,1,1,0, 0,0,1,0, 0,1,0,1];
+const BOSS_HAT =   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1];
+
+function scheduleDNB(){
   if(!audioCtx||!musicPlaying)return;
-  const intensity = bossMusicActive ? 1 : Math.min(0.6, level * 0.03);
-  const bpm = bossMusicActive ? 40 : 28; // Very slow for ambient
-  const beatD = 60/bpm;
-  const barD = beatD * 4;
-  const now = audioCtx.currentTime;
-  const chords = bossMusicActive ? BOSS_CHORDS : AMBIENT_CHORDS;
-  
-  for(let bar=0; bar<2; bar++){
-    const barStart = now + bar * barD + 0.05;
-    const chordIdx = (ambientPhase + bar) % chords.length;
-    const chord = chords[chordIdx];
-    
-    // Deep sub drone - always present
-    playDeepDrone(chord[0], barStart, barD * 0.95);
-    
-    // Evolving pad - main texture
-    playEvolvingPad(chord, barStart, barD * 0.9, intensity);
-    
-    // Shimmer layer - adds sparkle
-    if(Math.random() < 0.6 + intensity * 0.3)
-      playShimmer(chord, barStart + beatD * (Math.random() * 2), barD * 0.6, intensity);
-    
-    // Melodic fragments - sparse, mysterious
-    if(Math.random() < 0.4 + intensity * 0.4)
-      playGhostMelody(chord, barStart, beatD, intensity);
-    
-    // Boss: add tension elements
-    if(bossMusicActive){
-      playTensionPulse(chord, barStart, beatD, intensity);
-      if(bar % 2 === 0) playWarDrums(barStart, beatD);
-      playDissonantStinger(chord, barStart + beatD * 2, beatD * 1.5);
+  // Normal: 170 BPM deep DnB. Boss: 185 BPM intense breaks
+  const bpm = bossMusicActive ? 185 : 170;
+  const sixD = 60/bpm/4, barD = sixD*16, now = audioCtx.currentTime;
+
+  for(let bar=0;bar<4;bar++){
+    const chordIdx = (Math.floor(now/barD)+bar)%DNB_CHORDS.length;
+    const chord = DNB_CHORDS[chordIdx];
+    const bassNote = DNB_BASS_NOTES[chordIdx];
+    const barStart = now + bar*barD;
+
+    // Warm harmonic pad
+    playWarmPad(chord, barStart, barD);
+
+    // Deep sub bass - pure sine, floor-shaking
+    playSubBass(bassNote, barStart, barD);
+
+    // Drum patterns
+    const kick = bossMusicActive ? BOSS_KICK : AMEN_KICK;
+    const snare = bossMusicActive ? BOSS_SNARE : AMEN_SNARE;
+    const hat = bossMusicActive ? BOSS_HAT : AMEN_HAT;
+    for(let s=0;s<16;s++){
+      const t = barStart + s*sixD;
+      if(kick[s]) playKick(t, sixD*0.9);
+      if(snare[s]) playSnare(t, sixD*0.8);
+      if(hat[s]) playHiHat(t, sixD*0.25, s%4===0?0.07:s%2===0?0.04:0.025);
     }
+
+    // Subtle synth stab - only in boss mode for tension
+    if(bossMusicActive && bar%2===0) playSynthStab(chord, barStart, sixD);
+
+    // Dark atmospheric pad
+    if(!bossMusicActive || bar%2===0) playAtmoPad(chord, barStart, barD);
+
+    // Rhythmic bass fills on off-beats
+    if(bar%2===1) playBassFill(chord, barStart, sixD);
     
-    // Subtle rhythmic element at higher levels
-    if(level > 3 || bossMusicActive){
-      for(let b=0; b<4; b++){
-        const t = barStart + b * beatD;
-        if(bossMusicActive || Math.random() < 0.3 + intensity * 0.3)
-          playSubtleTick(t, beatD * 0.3, bossMusicActive ? 0.04 : 0.015);
-      }
-    }
+
   }
-  
-  ambientPhase += 2;
-  setTimeout(()=>scheduleAmbient(), (barD * 1.8) * 1000);
+
+  setTimeout(()=>scheduleDNB(), (barD*3.5)*1000);
 }
 
-// Deep sub drone - foundation
-function playDeepDrone(note, time, dur){
+// Warm sine pad - gentle harmonic wash
+function playWarmPad(chord,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass'; f.frequency.value=150; f.Q.value=0.5;
+  f.type='lowpass'; f.frequency.value=600; f.Q.value=0.3;
   f.connect(g); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.12 : 0.07;
-  g.gain.setValueAtTime(0,time);
-  g.gain.linearRampToValueAtTime(vol,time+dur*0.15);
-  g.gain.setValueAtTime(vol,time+dur*0.7);
-  g.gain.linearRampToValueAtTime(0,time+dur);
-  
-  const freq = midiToFreq(note);
-  const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
-  o1.type='sine'; o2.type='sine';
-  o1.frequency.setValueAtTime(freq, time);
-  o2.frequency.setValueAtTime(freq*1.001, time); // slight detune for warmth
-  o1.connect(f); o2.connect(f);
-  o1.start(time); o2.start(time);
-  o1.stop(time+dur+0.5); o2.stop(time+dur+0.5);
-}
+  const vol = bossMusicActive ? 0.05 : 0.035;
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+dur*0.4);
+  g.gain.linearRampToValueAtTime(vol*0.5,time+dur*0.8); g.gain.linearRampToValueAtTime(0,time+dur+0.6);
 
-// Evolving pad - main atmospheric texture
-function playEvolvingPad(chord, time, dur, intensity){
-  if(!audioCtx)return;
-  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass';
-  const baseFreq = bossMusicActive ? 600 : 400;
-  const peakFreq = bossMusicActive ? 2200 : 1200;
-  f.frequency.setValueAtTime(baseFreq, time);
-  f.frequency.linearRampToValueAtTime(peakFreq, time+dur*0.4);
-  f.frequency.linearRampToValueAtTime(baseFreq*0.8, time+dur);
-  f.Q.value = bossMusicActive ? 2 : 0.8;
-  f.connect(g); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.05 : 0.03;
-  g.gain.setValueAtTime(0,time);
-  g.gain.linearRampToValueAtTime(vol,time+dur*0.25);
-  g.gain.linearRampToValueAtTime(vol*0.7,time+dur*0.75);
-  g.gain.linearRampToValueAtTime(0,time+dur+0.8);
-  
-  // Use upper chord tones for pad
-  for(let i=2; i<chord.length; i++){
-    const freq = midiToFreq(chord[i] + 12);
-    const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
+  for(let i=0;i<3;i++){
+    const noteIdx = [0, 2, 3][i];
+    if(noteIdx >= chord.length) continue;
+    const freq = midiToFreq(chord[noteIdx] + 12);
+    const o1 = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
     o1.type='sine'; o2.type='triangle';
     o1.frequency.setValueAtTime(freq, time);
-    o2.frequency.setValueAtTime(freq*1.003, time);
-    // Slow LFO for movement
+    o2.frequency.setValueAtTime(freq*1.001, time);
+    // Gentle LFO for movement
     const lfo=audioCtx.createOscillator(), lfoG=audioCtx.createGain();
-    lfo.type='sine'; lfo.frequency.value=0.15 + Math.random()*0.2;
-    lfoG.gain.value=freq*0.004;
+    lfo.type='sine'; lfo.frequency.value=0.2+i*0.1; lfoG.gain.value=freq*0.002;
     lfo.connect(lfoG); lfoG.connect(o1.frequency);
-    const mix=audioCtx.createGain(); mix.gain.value=0.25;
+    const mix=audioCtx.createGain(); mix.gain.value=0.3;
     o1.connect(f); o2.connect(mix); mix.connect(f);
     o1.start(time); o2.start(time); lfo.start(time);
-    o1.stop(time+dur+1); o2.stop(time+dur+1); lfo.stop(time+dur+1);
+    o1.stop(time+dur+0.7); o2.stop(time+dur+0.7); lfo.stop(time+dur+0.7);
   }
 }
 
-// Shimmer - high frequency sparkle
-function playShimmer(chord, time, dur, intensity){
+// Deep sub bass - pure sine wave, floor rumble
+function playSubBass(note,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='bandpass'; f.frequency.value=3000 + intensity*2000; f.Q.value=0.5;
+  f.type='lowpass'; f.frequency.value=120; f.Q.value=0.7;
   f.connect(g); g.connect(musicGain);
-  g.gain.setValueAtTime(0,time);
-  g.gain.linearRampToValueAtTime(0.015,time+dur*0.1);
-  g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-  
-  const note = chord[Math.floor(Math.random()*chord.length)] + 24;
-  const freq = midiToFreq(note);
-  const o=audioCtx.createOscillator();
-  o.type='sine';
-  o.frequency.setValueAtTime(freq, time);
-  o.frequency.linearRampToValueAtTime(freq*1.02, time+dur);
-  o.connect(f); o.start(time); o.stop(time+dur+0.3);
-  
-  // Add a gentle harmonic
-  const o2=audioCtx.createOscillator();
-  o2.type='sine'; o2.frequency.setValueAtTime(freq*2, time);
-  const h2g=audioCtx.createGain(); h2g.gain.value=0.15;
-  o2.connect(h2g); h2g.connect(f);
-  o2.start(time); o2.stop(time+dur+0.3);
-}
+  const vol = bossMusicActive ? 0.35 : 0.28;
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+0.02);
+  g.gain.setValueAtTime(vol,time+dur*0.3);
+  g.gain.exponentialRampToValueAtTime(vol*0.5,time+dur*0.7);
+  g.gain.linearRampToValueAtTime(0.001,time+dur+0.1);
 
-// Ghost melody - sparse, ethereal notes
-function playGhostMelody(chord, startTime, beatD, intensity){
-  if(!audioCtx)return;
-  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  const dl=audioCtx.createDelay(2.0), dg=audioCtx.createGain();
-  const dl2=audioCtx.createDelay(3.0), dg2=audioCtx.createGain();
-  f.type='lowpass'; f.frequency.value=2000 + intensity*1500; f.Q.value=0.5;
-  dl.delayTime.value=beatD*1.5; dg.gain.value=0.35;
-  dl2.delayTime.value=beatD*2.5; dg2.gain.value=0.2;
-  f.connect(g); f.connect(dl); dl.connect(dg); dg.connect(g);
-  f.connect(dl2); dl2.connect(dg2); dg2.connect(g);
-  g.connect(musicGain); g.gain.value=0.025;
-  
-  const noteCount = 1 + Math.floor(Math.random()*2);
-  const scale = [...chord, chord[0]+12, chord[2]+12, chord[4]+7];
-  for(let i=0; i<noteCount; i++){
-    const t = startTime + i*beatD*(1+Math.random()*2);
-    const note = scale[Math.floor(Math.random()*scale.length)] + 12;
-    const dur = beatD * (1.5 + Math.random()*3);
-    const o=audioCtx.createOscillator();
-    o.type=Math.random()<0.7?'sine':'triangle';
-    o.frequency.setValueAtTime(midiToFreq(note), t);
-    // Vibrato
-    const vib=audioCtx.createOscillator(), vibG=audioCtx.createGain();
-    vib.type='sine'; vib.frequency.value=3+Math.random()*2;
-    vibG.gain.value=midiToFreq(note)*0.005;
-    vib.connect(vibG); vibG.connect(o.frequency);
-    const ng=audioCtx.createGain();
-    ng.gain.setValueAtTime(0,t); ng.gain.linearRampToValueAtTime(0.6,t+0.03);
-    ng.gain.exponentialRampToValueAtTime(0.08,t+dur*0.6);
-    ng.gain.linearRampToValueAtTime(0.001,t+dur+0.3);
-    o.connect(ng); ng.connect(f); o.start(t); o.stop(t+dur+0.5);
-    vib.start(t); vib.stop(t+dur+0.5);
-  }
-}
-
-// Boss tension pulse - rhythmic low throb
-function playTensionPulse(chord, time, beatD, intensity){
-  if(!audioCtx)return;
-  const freq = midiToFreq(chord[0] - 12);
-  for(let i=0; i<4; i++){
-    const t = time + i*beatD;
-    const g=audioCtx.createGain();
-    g.connect(musicGain);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.08, t+0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t+beatD*0.7);
-    const o=audioCtx.createOscillator();
-    o.type='sine';
-    o.frequency.setValueAtTime(freq*(i%2===0?1:1.5), t);
-    o.frequency.exponentialRampToValueAtTime(freq*0.8, t+beatD*0.5);
-    o.connect(g); o.start(t); o.stop(t+beatD);
-  }
-}
-
-// Boss war drums - deep percussive hits
-function playWarDrums(time, beatD){
-  if(!audioCtx)return;
-  const pattern = [1,0,0,1,0,1,0,0, 1,0,1,0,0,1,0,1];
-  for(let i=0; i<pattern.length; i++){
-    if(!pattern[i]) continue;
-    const t = time + i*(beatD/4);
-    const g=audioCtx.createGain();
-    g.connect(musicGain);
-    g.gain.setValueAtTime(0.15, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t+0.3);
-    const o=audioCtx.createOscillator();
-    o.type='sine';
-    o.frequency.setValueAtTime(i%4===0?60:45, t);
-    o.frequency.exponentialRampToValueAtTime(25, t+0.2);
-    o.connect(g); o.start(t); o.stop(t+0.4);
-    // Add noise hit for impact
-    const bs=audioCtx.sampleRate*0.05;
-    const buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
-    const d=buf.getChannelData(0);
-    for(let j=0;j<bs;j++) d[j]=(Math.random()*2-1)*Math.pow(1-j/bs,3);
-    const src=audioCtx.createBufferSource(); src.buffer=buf;
-    const ng=audioCtx.createGain(); ng.gain.setValueAtTime(0.06,t);
-    ng.gain.exponentialRampToValueAtTime(0.001,t+0.08);
-    const nf=audioCtx.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=800;
-    src.connect(nf); nf.connect(ng); ng.connect(musicGain);
-    src.start(t); src.stop(t+0.1);
-  }
-}
-
-// Dissonant stinger for boss tension
-function playDissonantStinger(chord, time, dur){
-  if(!audioCtx)return;
-  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass'; f.frequency.setValueAtTime(800,time);
-  f.frequency.linearRampToValueAtTime(3000,time+dur*0.2);
-  f.frequency.linearRampToValueAtTime(400,time+dur);
-  f.Q.value=3;
-  f.connect(g); g.connect(musicGain);
-  g.gain.setValueAtTime(0,time);
-  g.gain.linearRampToValueAtTime(0.04,time+0.02);
-  g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-  // Dissonant interval - tritone
-  const freq = midiToFreq(chord[0]+24);
+  const freq=midiToFreq(note);
+  // Sine sub + subtle triangle harmonic
   const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
-  o1.type='sawtooth'; o2.type='sawtooth';
+  o1.type='sine'; o2.type='triangle';
   o1.frequency.setValueAtTime(freq,time);
-  o2.frequency.setValueAtTime(freq*Math.pow(2,6/12),time); // tritone
-  o1.connect(f); o2.connect(f);
+  o2.frequency.setValueAtTime(freq,time);
+  const o2g=audioCtx.createGain(); o2g.gain.value=0.15;
+  o1.connect(f); o2.connect(o2g); o2g.connect(f);
   o1.start(time); o2.start(time);
   o1.stop(time+dur+0.2); o2.stop(time+dur+0.2);
 }
 
-// Subtle tick for rhythm
-function playSubtleTick(time, dur, vol){
+// Punchy kick drum with sub weight
+function playKick(time,dur){
   if(!audioCtx)return;
-  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='highpass'; f.frequency.value=6000;
-  f.connect(g); g.connect(musicGain);
+  const g=audioCtx.createGain(); g.connect(musicGain);
+  const vol = bossMusicActive ? 0.55 : 0.48;
   g.gain.setValueAtTime(vol,time);
   g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-  const bs=audioCtx.sampleRate*dur;
-  const buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
+
+  // Pitch sweep from 160Hz down to 35Hz
+  const o=audioCtx.createOscillator();
+  o.frequency.setValueAtTime(160,time);
+  o.frequency.exponentialRampToValueAtTime(35,time+0.06);
+  o.connect(g); o.start(time); o.stop(time+dur);
+
+  // Click transient for attack
+  const click=audioCtx.createOscillator(), cg=audioCtx.createGain();
+  click.type='square'; click.frequency.value=1200;
+  cg.gain.setValueAtTime(0.1,time); cg.gain.exponentialRampToValueAtTime(0.001,time+0.008);
+  click.connect(cg); cg.connect(musicGain); click.start(time); click.stop(time+0.015);
+
+  // Sub layer for extra bass weight
+  const sub=audioCtx.createOscillator(), sg=audioCtx.createGain();
+  sub.type='sine'; sub.frequency.setValueAtTime(55,time);
+  sg.gain.setValueAtTime(0.25,time); sg.gain.exponentialRampToValueAtTime(0.001,time+dur*0.8);
+  sub.connect(sg); sg.connect(musicGain); sub.start(time); sub.stop(time+dur);
+}
+
+// Snappy snare with noise burst
+function playSnare(time,dur){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(); g.connect(musicGain);
+  g.gain.setValueAtTime(bossMusicActive?0.38:0.32,time);
+  g.gain.exponentialRampToValueAtTime(0.001,time+dur);
+
+  // Noise component
+  const bs=audioCtx.sampleRate*dur, buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
   const d=buf.getChannelData(0);
-  for(let i=0;i<bs;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/bs,4);
+  for(let i=0;i<bs;i++) d[i]=(Math.random()*2-1);
+  const noise=audioCtx.createBufferSource(); noise.buffer=buf;
+  const nf=audioCtx.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=4000; nf.Q.value=1.2;
+  const ng=audioCtx.createGain(); ng.gain.setValueAtTime(0.35,time); ng.gain.exponentialRampToValueAtTime(0.001,time+dur*0.6);
+  noise.connect(nf); nf.connect(ng); ng.connect(musicGain);
+  noise.start(time); noise.stop(time+dur);
+
+  // Tonal body
+  const o=audioCtx.createOscillator(); o.type='triangle';
+  o.frequency.setValueAtTime(220,time); o.frequency.exponentialRampToValueAtTime(120,time+0.03);
+  o.connect(g); o.start(time); o.stop(time+dur);
+}
+
+// Crisp hi-hat from filtered noise
+function playHiHat(time,dur,vol){
+  if(!audioCtx)return;
+  const bs=audioCtx.sampleRate*dur, buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<bs;i++) d[i]=(Math.random()*2-1);
   const src=audioCtx.createBufferSource(); src.buffer=buf;
-  src.connect(f); src.start(time); src.stop(time+dur);
+  const f=audioCtx.createBiquadFilter(); f.type='highpass'; f.frequency.value=9000;
+  const f2=audioCtx.createBiquadFilter(); f2.type='bandpass'; f2.frequency.value=12000; f2.Q.value=1;
+  const g=audioCtx.createGain();
+  g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.001,time+dur);
+  src.connect(f); f.connect(f2); f2.connect(g); g.connect(musicGain);
+  src.start(time); src.stop(time+dur);
+}
+
+// DnB bass fill - rhythmic sub hits on off-beats
+function playBassFill(chord,startTime,sixD){
+  if(!audioCtx)return;
+  const root = chord[0];
+  const pattern = bossMusicActive ? [0,3,6,8,10,12,14] : [0,4,8,12];
+  for(const step of pattern){
+    const t = startTime + step*sixD;
+    const dur = sixD * 0.8;
+    const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
+    f.type='lowpass'; f.frequency.value=200; f.Q.value=0.5;
+    f.connect(g); g.connect(musicGain);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.15,t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    const note = root + (step%3===0 ? 0 : step%3===1 ? 7 : 5);
+    const o=audioCtx.createOscillator();
+    o.type='sine';
+    o.frequency.setValueAtTime(midiToFreq(note),t);
+    o.frequency.exponentialRampToValueAtTime(midiToFreq(note)*0.9,t+dur);
+    o.connect(f); o.start(t); o.stop(t+dur+0.05);
+  }
+}
+
+// Subtle synth stab for boss tension
+function playSynthStab(chord,time,sixD){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
+  f.type='lowpass'; f.frequency.value=2500; f.Q.value=1;
+  f.connect(g); g.connect(musicGain);
+  
+  // Just play the chord root as a quick stab
+  const freq = midiToFreq(chord[0] + 24);
+  const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator();
+  o1.type='triangle'; o2.type='sine';
+  o1.frequency.setValueAtTime(freq, time);
+  o2.frequency.setValueAtTime(freq*0.5, time);
+  
+  g.gain.setValueAtTime(0, time);
+  g.gain.linearRampToValueAtTime(0.06, time + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, time + sixD * 2);
+  
+  o1.connect(f); o2.connect(f);
+  o1.start(time); o2.start(time);
+  o1.stop(time + sixD * 2.5); o2.stop(time + sixD * 2.5);
+}
+
+// Dark atmospheric pad
+function playAtmoPad(chord,time,dur){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
+  f.type='lowpass'; f.frequency.value=bossMusicActive?800:1000; f.Q.value=1.5;
+  f.connect(g); g.connect(musicGain);
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.035,time+dur*0.35);
+  g.gain.linearRampToValueAtTime(0.025,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.4);
+
+  for(let i=1;i<Math.min(4,chord.length);i++){
+    const freq=midiToFreq(chord[i]+24);
+    const o=audioCtx.createOscillator();
+    o.type='sine';
+    o.frequency.setValueAtTime(freq,time);
+    // Slow vibrato
+    const vib=audioCtx.createOscillator(), vibG=audioCtx.createGain();
+    vib.type='sine'; vib.frequency.value=0.3; vibG.gain.value=freq*0.003;
+    vib.connect(vibG); vibG.connect(o.frequency);
+    o.connect(f); o.start(time); o.stop(time+dur+0.5);
+    vib.start(time); vib.stop(time+dur+0.5);
+  }
 }
 
 function playSFX(freq,type,dur,vol){
@@ -382,10 +364,10 @@ window.addEventListener('keydown', e => {
     } else if (e.key === 'Enter' || e.key === ' ') {
       if (shipHoverIdx >= 0) {
         player = createPlayer(shipHoverIdx);
-        level = 1; score = 0; credits = 0; enemiesKilled = 0; enemiesSpawned = 0; enemiesNeeded = 20;
+        level = 1; score = 0; credits = 0; enemiesKilled = 0; enemiesSpawned = 0; enemiesNeeded = 12;
         bossActive = false; boss = null;
-        bullets = []; enemies = []; enemyBullets = []; pickups = []; particles = []; creditPopups = []; comboCount = 0; comboMultiplier = 1; comboTimer = 0; maxCombo = 0;
-        spawnTimer = 0; transitionTimer = 0; waveNumber = 0; levelHasMiniBoss = false;
+        bullets = []; enemies = []; enemyBullets = []; pickups = []; particles = []; creditPopups = [];
+        spawnTimer = 0; transitionTimer = 0;
         gameState = 'playing';
       }
     }
@@ -571,10 +553,7 @@ function updatePlayer() {
   player.y = Math.max(20,Math.min(H-20,player.y));
   if (player.invincible>0) player.invincible--;
   if (player.shieldFlash>0) player.shieldFlash--;
-  
-  // Combo timer decay
-  if (comboTimer > 0) { comboTimer--; if (comboTimer <= 0) { comboCount = 0; comboMultiplier = 1; } }
-fireWeapons();
+  fireWeapons();
 }
 
 // FIRE WEAPONS
@@ -644,17 +623,14 @@ function drawBullets() {
 
 // LEVEL COMPOSITION
 function getLevelEnemyPool(lvl) {
-  // More varied enemy compositions with distinct level themes
-  if (lvl<=2) return [{type:'drone',weight:5},{type:'swarmling',weight:2}]; // Tutorial: basics
-  if (lvl<=3) return [{type:'drone',weight:4},{type:'sine',weight:3},{type:'swarmling',weight:2}]; // Intro waves
-  if (lvl<=5) return [{type:'drone',weight:2},{type:'sine',weight:4},{type:'strafer',weight:3},{type:'kamikaze',weight:1}]; // First shooters
-  if (lvl<=7) return [{type:'sine',weight:2},{type:'strafer',weight:3},{type:'kamikaze',weight:3},{type:'zigzag',weight:3},{type:'drone',weight:1}]; // Chaos intro
-  if (lvl<=9) return [{type:'strafer',weight:3},{type:'kamikaze',weight:2},{type:'turret',weight:3},{type:'zigzag',weight:2},{type:'sniper',weight:2}]; // Turret gauntlet
-  if (lvl<=12) return [{type:'kamikaze',weight:3},{type:'turret',weight:2},{type:'zigzag',weight:3},{type:'sniper',weight:3},{type:'swarmling',weight:4}]; // Sniper hell
-  if (lvl<=15) return [{type:'strafer',weight:2},{type:'kamikaze',weight:3},{type:'turret',weight:2},{type:'zigzag',weight:3},{type:'sniper',weight:3},{type:'swarmling',weight:5}]; // Swarm zone
-  if (lvl<=18) return [{type:'kamikaze',weight:4},{type:'turret',weight:3},{type:'zigzag',weight:2},{type:'sniper',weight:4},{type:'swarmling',weight:5},{type:'sine',weight:2}]; // Everything
-  if (lvl<=22) return [{type:'turret',weight:4},{type:'sniper',weight:5},{type:'kamikaze',weight:3},{type:'swarmling',weight:6},{type:'strafer',weight:2}]; // Bullet hell
-  return [{type:'drone',weight:1},{type:'sine',weight:2},{type:'strafer',weight:3},{type:'kamikaze',weight:5},{type:'turret',weight:4},{type:'zigzag',weight:3},{type:'sniper',weight:5},{type:'swarmling',weight:6}]; // Endgame
+  if (lvl<=2) return [{type:'drone',weight:5},{type:'swarmling',weight:3}];
+  if (lvl<=4) return [{type:'drone',weight:4},{type:'sine',weight:3},{type:'swarmling',weight:2}];
+  if (lvl<=6) return [{type:'drone',weight:2},{type:'sine',weight:3},{type:'strafer',weight:3},{type:'kamikaze',weight:2}];
+  if (lvl<=8) return [{type:'sine',weight:2},{type:'strafer',weight:3},{type:'kamikaze',weight:3},{type:'zigzag',weight:3}];
+  if (lvl<=12) return [{type:'strafer',weight:2},{type:'kamikaze',weight:2},{type:'turret',weight:3},{type:'zigzag',weight:2},{type:'sniper',weight:2}];
+  if (lvl<=16) return [{type:'strafer',weight:2},{type:'kamikaze',weight:3},{type:'turret',weight:2},{type:'zigzag',weight:3},{type:'sniper',weight:3},{type:'swarmling',weight:4}];
+  if (lvl<=20) return [{type:'kamikaze',weight:3},{type:'turret',weight:3},{type:'zigzag',weight:2},{type:'sniper',weight:4},{type:'swarmling',weight:5},{type:'sine',weight:2}];
+  return [{type:'drone',weight:1},{type:'sine',weight:2},{type:'strafer',weight:3},{type:'kamikaze',weight:4},{type:'turret',weight:3},{type:'zigzag',weight:3},{type:'sniper',weight:4},{type:'swarmling',weight:5}];
 }
 function pickWeightedEnemy(pool) {
   let total=0; for(const p of pool) total+=p.weight;
@@ -663,42 +639,20 @@ function pickWeightedEnemy(pool) {
 }
 
 // ENEMIES - slower scaling, more HP, credits on kill
-function createEnemy(type) {
-  const def = ENEMY_TYPES[type];
-  const e = { x:W+40, y:Math.random()*(H-100)+50, w:def.w, h:def.h, hp:def.hp, maxHp:def.hp,
-    speed:def.speed, color:def.color, type:type, move:def.move, shoots:def.shoots,
-    fireRate:def.fireRate||0, fireCt:0, score:def.score, credits:def.credits, t:0,
-    originY:0, amp:def.amp||0, freq:def.freq||0, aimed:def.aimed||false };
-  e.originY=e.y;
-  return e;
-}
-
 function spawnEnemy() {
   if (enemiesSpawned >= enemiesNeeded) return;
-  const pool = getLevelEnemyPool(level);
-  const type = pickWeightedEnemy(pool);
-  const e = createEnemy(type);
-  enemies.push(e);
+  const pool=getLevelEnemyPool(level), typeKey=pickWeightedEnemy(pool), def=ENEMY_TYPES[typeKey];
+  const hpScale=1+Math.floor((level-1)/3)*0.25, spdScale=1+(level-1)*0.05;
+  const originY=40+Math.random()*(H-80);
+  const creditValue = Math.ceil(def.credits * (1 + level * 0.08));
+  enemies.push({x:W+20,y:originY,w:def.w,h:def.h,hp:Math.ceil(def.hp*hpScale),maxHp:Math.ceil(def.hp*hpScale),
+    speed:def.speed*spdScale,color:def.color,move:def.move,shoots:def.shoots,
+    fireRate:Math.max(10,Math.floor((def.fireRate||999)*(1-level*0.015))),
+    fireCooldown:Math.random()*(def.fireRate||60),aimed:def.aimed||false,
+    score:Math.ceil(def.score*(1+level*0.1)),credits:creditValue,
+    t:Math.random()*100,originY:originY,
+    amp:def.amp||0,freq:def.freq||0,zigDir:1,type:typeKey});
   enemiesSpawned++;
-}
-
-function spawnMiniBoss() {
-  // Mini-boss: a beefed up turret or sniper with lots of HP
-  const types = ['turret','sniper','strafer'];
-  const type = types[Math.floor(Math.random()*types.length)];
-  const def = ENEMY_TYPES[type];
-  const e = {
-    x:W+40, y:H/2, w:def.w*1.8, h:def.h*1.8, hp:def.hp*4+level*2, maxHp:def.hp*4+level*2,
-    speed:def.speed*0.6, color:'#ff00ff', type:type, move:def.move, shoots:true,
-    fireRate:Math.max(15, (def.fireRate||40)-10), fireCt:0, score:def.score*5,
-    credits:def.credits*5, t:0, originY:H/2, amp:def.amp||0, freq:def.freq||0,
-    aimed:true, isMiniBoss:true
-  };
-  enemies.push(e);
-  enemiesSpawned += 3; // Counts as 3 enemies
-  // Flash warning
-  screenShake = 8;
-  playSFX(200,'sawtooth',0.4,0.08);
 }
 function updateEnemies() {
   for (let i=enemies.length-1;i>=0;i--) {
@@ -737,26 +691,11 @@ function drawEnemy(e) {
   if (e.hp<e.maxHp){ctx.shadowBlur=0;const bw=e.w+4;ctx.fillStyle='#333';ctx.fillRect(-bw/2,-e.h/2-6,bw,3);ctx.fillStyle=e.color;ctx.fillRect(-bw/2,-e.h/2-6,bw*(e.hp/e.maxHp),3);}
   ctx.restore();
 }
-function drawEnemyWithHP(e) { drawEnemy(e); if(e.isMiniBoss) drawMiniBossHP(e); }
-
 
 // ENEMY BULLETS
 function updateEnemyBullets() {
   for(let i=enemyBullets.length-1;i>=0;i--){const b=enemyBullets[i];b.x+=b.vx;b.y+=b.vy;if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20)enemyBullets.splice(i,1);}
 }
-
-function drawMiniBossHP(e) {
-  if (!e.isMiniBoss) return;
-  const barW = e.w * 2, barH = 4;
-  const x = e.x - barW/2, y = e.y - e.h - 8;
-  ctx.fillStyle = '#333'; ctx.fillRect(x, y, barW, barH);
-  const pct = e.hp / e.maxHp;
-  ctx.fillStyle = pct > 0.5 ? '#ff00ff' : pct > 0.25 ? '#ff4400' : '#ff0000';
-  ctx.fillRect(x, y, barW * pct, barH);
-  ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 1; ctx.strokeRect(x, y, barW, barH);
-  drawNeonText('★ ELITE ★', e.x, y - 8, 9, '#ff00ff');
-}
-
 function drawEnemyBullets() {
   for(const b of enemyBullets){ctx.save();ctx.fillStyle=b.color;ctx.shadowColor=b.color;ctx.shadowBlur=6;ctx.beginPath();ctx.arc(b.x,b.y,b.size,0,Math.PI*2);ctx.fill();ctx.restore();}
 }
@@ -807,11 +746,8 @@ function drawBoss() {
 
 // PICKUPS
 function spawnPickup(x, y) {
-  if (Math.random()>0.25) return; // Slightly higher drop rate
-  const roll = Math.random();
-  if (roll < 0.3) pickups.push({x,y,w:16,h:16,type:'health',t:0,life:480});
-  else if (roll < 0.38) pickups.push({x,y,w:16,h:16,type:'shield',t:0,life:480}); // Temporary shield!
-  else if (roll < 0.45) pickups.push({x,y,w:16,h:16,type:'credits',t:0,life:480}); // Bonus credits
+  if (Math.random()>0.2) return;
+  if (Math.random()<0.4) pickups.push({x,y,w:16,h:16,type:'health',t:0,life:480});
   else { const types=Object.keys(WEAPON_DEFS); pickups.push({x,y,w:16,h:16,type:types[Math.floor(Math.random()*types.length)],t:0,life:480}); }
 }
 function updatePickups() {
@@ -821,20 +757,9 @@ function updatePickups() {
     if (!player) continue;
     if (Math.abs(p.x-player.x)<30 && Math.abs(p.y-player.y)<30) {
       if (p.type==='health'){player.armor=Math.min(player.maxArmor,player.armor+1);spawnParticle(p.x,p.y,COLORS.green,10,3,20);}
-      else if (p.type==='shield'){player.invincible=Math.max(player.invincible,180);spawnParticle(p.x,p.y,COLORS.blue,15,4,25);playSFX(1400,'sine',0.2,0.08);}
-      else if (p.type==='credits'){const amt=10+level*3;credits+=amt;spawnCreditPopup(p.x,p.y,amt);spawnParticle(p.x,p.y,COLORS.yellow,12,4,20);playSFX(1100,'sine',0.15,0.07);}
       else { const wdef=WEAPON_DEFS[p.type]; if(wdef){const existing=player.weapons.find(w=>w.name===wdef.name);
-        if(!existing){
-          if(player.weapons.length<player.weaponSlots){player.weapons.push({...wdef,cooldown:0});spawnParticle(p.x,p.y,wdef.color,10,3,20);}
-          else{
-            // Slots full - convert to credits instead of replacing evolved weapons!
-            const creditVal = 15 + level * 2;
-            credits += creditVal;
-            spawnCreditPopup(p.x, p.y, creditVal);
-            spawnParticle(p.x,p.y,COLORS.yellow,12,4,25);
-            playSFX(1200,'sine',0.12,0.06);
-          }
-        } else { spawnParticle(p.x,p.y,wdef.color,10,3,20); }}}
+        if(!existing){if(player.weapons.length<player.weaponSlots)player.weapons.push({...wdef,cooldown:0});else player.weapons[player.weapons.length-1]={...wdef,cooldown:0};}
+        spawnParticle(p.x,p.y,wdef.color,10,3,20);}}
       pickups.splice(i,1);
       playSFX(880, 'sine', 0.15, 0.08);
     }
@@ -846,8 +771,6 @@ function drawPickups() {
     if (p.life<120 && Math.floor(p.t/6)%2===0) continue;
     ctx.save(); ctx.translate(p.x,p.y+bob);
     if (p.type==='health'){drawGlow(0,0,14,COLORS.green,0.3);ctx.fillStyle=COLORS.green;ctx.shadowColor=COLORS.green;ctx.shadowBlur=8;ctx.fillRect(-2,-6,4,12);ctx.fillRect(-6,-2,12,4);}
-    else if(p.type==='shield'){ctx.fillStyle=COLORS.blue;ctx.shadowColor=COLORS.blue;ctx.shadowBlur=10;ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.stroke();ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#fff';ctx.fillText('S',0,0);}
-    else if(p.type==='credits'){ctx.fillStyle=COLORS.yellow;ctx.shadowColor=COLORS.yellow;ctx.shadowBlur=10;ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.fill();ctx.font='9px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#000';ctx.fillText('$',0,0);}
     else{const wdef=WEAPON_DEFS[p.type];const col=wdef?wdef.color:COLORS.white;drawGlow(0,0,14,col,0.3);ctx.strokeStyle=col;ctx.lineWidth=2;ctx.shadowColor=col;ctx.shadowBlur=8;ctx.strokeRect(-8,-8,16,16);ctx.fillStyle=col;ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(p.type[0].toUpperCase(),0,0);}
     ctx.restore();
   }
@@ -872,13 +795,9 @@ function checkCollisions() {
         e.hp-=b.damage; spawnParticle(b.x,b.y,b.color,3,2,10);
         if (!b.pierce){bullets.splice(bi,1);hit=true;}
         if (e.hp<=0){
-          score+=e.score; credits+=Math.ceil(e.credits * comboMultiplier); enemiesKilled++;
+          score+=e.score; credits+=e.credits; enemiesKilled++;
           spawnParticle(e.x,e.y,e.color,20,5,30); spawnPickup(e.x,e.y);
-            // Combo system
-            comboCount++; comboTimer = 120; // 2 seconds to maintain combo
-            comboMultiplier = 1 + Math.floor(comboCount / 5) * 0.25; // +25% per 5 kills
-            if (comboCount > maxCombo) maxCombo = comboCount;
-          spawnCreditPopup(e.x, e.y-15, Math.ceil(e.credits * comboMultiplier));
+          spawnCreditPopup(e.x, e.y-15, e.credits);
           enemies.splice(ei,1); screenShake=5;
           playSFX(200,'sawtooth',0.2,0.08);
         }
@@ -891,9 +810,9 @@ function checkCollisions() {
         boss.hp-=b2.damage; spawnParticle(b2.x,b2.y,b2.color,3,2,8);
         if (!b2.pierce) bullets.splice(bi,1);
         if (boss.hp<=0) {
-          score+=500+level*50; credits+=Math.ceil(boss.credits * comboMultiplier);
+          score+=500+level*50; credits+=boss.credits;
           spawnParticle(boss.x,boss.y,boss.color,50,8,40); screenShake=20;
-          spawnCreditPopup(boss.x, boss.y-30, Math.ceil(boss.credits * comboMultiplier));
+          spawnCreditPopup(boss.x, boss.y-30, boss.credits);
           for(let d=0;d<3;d++){const types=Object.keys(WEAPON_DEFS);pickups.push({x:boss.x+(Math.random()-0.5)*100,y:boss.y+(Math.random()-0.5)*100,w:18,h:18,type:types[Math.floor(Math.random()*types.length)],t:0,life:600});}
           boss=null; bossActive=false; bossMusicActive=false; enemiesSpawned=0; enemiesKilled=0; transitionTimer=90;
           playSFX(100,'sawtooth',0.5,0.15);
@@ -934,10 +853,6 @@ function doGameOver() {
 }
 
 // SPAWNING / LEVEL PROGRESSION - slower progression
-let waveNumber = 0;
-let wavePause = 0;
-let levelHasMiniBoss = false;
-
 function updateSpawning() {
   if (bossActive) return;
   if (transitionTimer>0) {
@@ -945,48 +860,22 @@ function updateSpawning() {
     if (transitionTimer===0) { upgradeOptions=generateUpgradeOptions(); gameState='upgradeScreen'; upgradeHoverIdx=0; }
     return;
   }
-  
-  // Wave pause between bursts for breathing room
-  if (wavePause > 0) { wavePause--; return; }
-  
   if (enemiesSpawned < enemiesNeeded) {
     spawnTimer--;
     if (spawnTimer<=0) {
-      waveNumber++;
-      const waveSize = Math.min(5, 1+Math.floor(level/3));
-      
-      // Every 5th wave: formation spawn (all same type)
-      if (waveNumber % 5 === 0) {
-        const pool = getLevelEnemyPool(level);
-        const formationType = pickWeightedEnemy(pool);
-        for (let i=0; i<waveSize+1; i++) {
-          const e = createEnemy(formationType);
-          // Stagger Y positions for formation
-          e.y = 80 + (i * (H-160) / (waveSize+1));
-          enemies.push(e); enemiesSpawned++;
-        }
-        wavePause = 40; // Pause after formation
-      }
-      // Every 8th wave on levels 5+: mini-boss (a beefed up enemy)
-      else if (waveNumber % 8 === 0 && level >= 5 && !levelHasMiniBoss) {
-        levelHasMiniBoss = true;
-        spawnMiniBoss();
-        wavePause = 60;
-      }
-      else {
-        for (let i=0;i<waveSize;i++) spawnEnemy();
-      }
-      spawnTimer = Math.max(18, 50-level*2);
+      spawnTimer = Math.max(20, 55-level*2);
+      const waveSize = Math.min(4, 1+Math.floor(level/4));
+      for (let i=0;i<waveSize;i++) spawnEnemy();
     }
   }
   if (enemiesSpawned>=enemiesNeeded && enemies.length===0 && enemyBullets.length===0) {
     const nextLevel = level+1;
-    if (nextLevel%5===0) {
-      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; waveNumber=0; levelHasMiniBoss=false; enemiesNeeded=0;
+    if (nextLevel%10===0) {
+      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; enemiesNeeded=0;
       bossActive=true; bossMusicActive=true; boss=createBoss(); warningTimer=120; gameState='bossWarning';
     } else {
-      level=nextLevel; enemiesKilled=0; enemiesSpawned=0; waveNumber=0; levelHasMiniBoss=false;
-      enemiesNeeded=Math.min(60, 20+level*4);
+      level=nextLevel; enemiesKilled=0; enemiesSpawned=0;
+      enemiesNeeded=Math.min(40, 12+level*3);
       transitionTimer=60;
     }
   }
@@ -1083,26 +972,7 @@ function drawBossWarning() {
 }
 
 // HUD - now shows credits
-function drawDangerArrows() {
-  // Show arrows for enemies spawning from the right
-  for (const e of enemies) {
-    if (e.x > W - 30) {
-      const y = Math.max(20, Math.min(H-20, e.y));
-      ctx.save();
-      ctx.globalAlpha = 0.5 + Math.sin(frameCt*0.1)*0.3;
-      ctx.fillStyle = e.isMiniBoss ? '#ff00ff' : '#ff4444';
-      ctx.beginPath();
-      ctx.moveTo(W-5, y);
-      ctx.lineTo(W-15, y-6);
-      ctx.lineTo(W-15, y+6);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-}
-
 function drawHUD() {
-  drawDangerArrows();
   if (!player) return;
   drawNeonText('ARMOR',15,20,12,COLORS.cyan,'left');
   for (let i=0;i<player.maxArmor;i++){ctx.fillStyle=i<player.armor?COLORS.cyan:'#222';ctx.fillRect(15+i*14,28,10,10);ctx.strokeStyle=COLORS.cyan;ctx.lineWidth=1;ctx.strokeRect(15+i*14,28,10,10);}
@@ -1114,19 +984,6 @@ function drawHUD() {
   else if (boss) drawNeonText('BOSS',W/2,H-20,12,COLORS.red);
   drawNeonText('WEAPONS',15,H-60,10,COLORS.green,'left');
   for (let i=0;i<player.weapons.length;i++){const w=player.weapons[i];drawNeonText(w.name,15,H-45+i*14,10,w.color,'left');}
-  // Combo display
-  if (comboCount > 1) {
-    const comboAlpha = Math.min(1, comboTimer/30);
-    ctx.save(); ctx.globalAlpha = comboAlpha;
-    const comboColor = comboCount >= 20 ? '#ff00ff' : comboCount >= 10 ? '#ff4444' : comboCount >= 5 ? '#ffaa00' : COLORS.yellow;
-    drawNeonText('COMBO x'+comboCount, W-15, 60, comboCount >= 10 ? 18 : 14, comboColor, 'right');
-    if (comboMultiplier > 1) drawNeonText(comboMultiplier.toFixed(1)+'x Credits', W-15, 78, 10, COLORS.green, 'right');
-    ctx.restore();
-  }
-  // Max combo display
-  if (maxCombo > 5) {
-    drawNeonText('Best: x'+maxCombo, W-15, H-20, 10, '#666666', 'right');
-  }
   // Music toggle hint
   drawNeonText('[M] Music '+(musicMuted?'OFF':'ON'),W-15,H-15,9,musicMuted?'#555':COLORS.cyan,'right');
 }
@@ -1137,7 +994,7 @@ function drawMenu() {
   const t=Date.now()*0.001;
   drawNeonText('NEON VOID RUNNER',W/2,140,44,COLORS.cyan);
   drawNeonText('SCI-FI SIDE SCROLLER',W/2,190,16,COLORS.magenta);
-  drawNeonText('\u266b ambient \u266b',W/2,220,12,'#888888');
+  drawNeonText('\u266b drum & bass \u266b',W/2,220,12,'#888888');
   const demoShip=SHIP_DEFS[Math.floor(t)%3];
   drawShip(W/2+Math.sin(t*2)*30,310+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=400;
@@ -1180,7 +1037,7 @@ function drawShipSelect() {
   if (mouseClicked && shipHoverIdx>=0) {
     player=createPlayer(shipHoverIdx);
     level=1;score=0;credits=0;enemiesKilled=0;enemiesSpawned=0;enemiesNeeded=12;bossActive=false;boss=null;
-    bullets=[];enemies=[];enemyBullets=[];pickups=[];particles=[];creditPopups=[];spawnTimer=0;transitionTimer=0;comboCount=0;comboMultiplier=1;comboTimer=0;maxCombo=0;
+    bullets=[];enemies=[];enemyBullets=[];pickups=[];particles=[];creditPopups=[];spawnTimer=0;transitionTimer=0;
     gameState='playing';
   }
 }
@@ -1192,8 +1049,7 @@ function drawGameOver() {
   drawNeonText('Score: '+score,W/2,H/2-20,24,COLORS.yellow);
   drawNeonText('Credits Earned: '+credits,W/2,H/2+15,16,COLORS.yellow);
   drawNeonText('High Score: '+hiScore,W/2,H/2+45,18,COLORS.orange);
-  drawNeonText('Level Reached: '+level,W/2,H/2+70,16,COLORS.cyan);
-  if (maxCombo > 1) drawNeonText('Best Combo: x'+maxCombo,W/2,H/2+90,14,COLORS.magenta);
+  drawNeonText('Level Reached: '+level,W/2,H/2+75,16,COLORS.cyan);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=H/2+110;
   const hover=mouseX>=btnX&&mouseX<=btnX+btnW&&mouseY>=btnY&&mouseY<=btnY+btnH;
   const retryHighlighted = hover || gameOverBtnSelected;
@@ -1219,7 +1075,7 @@ function gameLoop() {
       updateStars(); updatePlayer(); updateBullets(); updateEnemies(); updateEnemyBullets();
       updateBoss(); updatePickups(); updateParticles(); updateCreditPopups(); checkCollisions(); updateSpawning();
       drawBackground(); drawPickups(); drawBullets(); drawEnemyBullets();
-      for (const e of enemies) drawEnemyWithHP(e); drawBoss();
+      for (const e of enemies) drawEnemy(e); drawBoss();
       if (player) {
         if (player.invincible>0 && Math.floor(player.invincible/3)%2===0) {}
         else drawShip(player.x,player.y,SHIP_DEFS[player.shipIdx],player.color,1);
