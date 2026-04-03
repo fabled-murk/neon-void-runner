@@ -20,306 +20,229 @@ let bossActive = false, boss = null, bossMusicActive = false;
 let screenShake = 0, transitionTimer = 0, warningTimer = 0, spawnTimer = 0;
 let particles = [], pickups = [], enemyBullets = [];
 let stars = [], nebulae = [], bullets = [], enemies = [];
-let player = null, upgradeOptions = [], selectedUpgrade = -1, shipHoverIdx = -1, upgradeHoverIdx = 0;
+let player = null, upgradeOptions = [], selectedUpgrade = -1, shipHoverIdx = -1;
 let frameCt = 0;
 let creditPopups = [];
 
 // ============================================
-// ============================================
-// BASSY DRUM & BASS / ACID SOUNDTRACK
-// Procedural synthesized audio - heavy sub bass, resonant acid lines
-// Boss levels switch to faster, more energetic tempo
-// ============================================
+// PROCEDURAL DRUM & BASS / ACID SOUNDTRACK
+// ===========================================
 let audioCtx = null, musicPlaying = false, musicGain = null, musicMuted = false;
-let compressor = null;
 
-// Dark DnB chord progressions - minor keys, lots of tension
+// D&B chord progressions - minor keys with tension
 const DNB_CHORDS = [
-  [36,39,43,46],[31,34,38,41],[34,37,41,44],[29,32,36,39],
-  [32,35,39,42],[27,30,34,37],[35,38,42,45],[30,33,37,40]
+  [48,51,55,58],[43,46,50,53],[46,49,53,56],[41,44,48,51],
+  [44,47,51,54],[39,42,46,49],[47,50,54,57],[42,45,49,52]
 ];
-const DNB_BASS_NOTES = [24,26,28,23,25,21,26,24];
+const DNB_BASS_NOTES = [36,38,40,35,37,33,38,36];
 
 function midiToFreq(m){return 440*Math.pow(2,(m-69)/12);}
 
 function initAudio(){
   if(audioCtx)return;
-  try{
-    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    // Master compressor for that punchy DnB sound
-    compressor=audioCtx.createDynamicsCompressor();
-    compressor.threshold.value=-24; compressor.knee.value=12;
-    compressor.ratio.value=8; compressor.attack.value=0.003; compressor.release.value=0.15;
-    musicGain=audioCtx.createGain(); musicGain.gain.value=0.45;
-    musicGain.connect(compressor); compressor.connect(audioCtx.destination);
-  }catch(e){return;}
+  try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();musicGain=audioCtx.createGain();musicGain.gain.value=0.4;musicGain.connect(audioCtx.destination);}catch(e){return;}
 }
 function startMusic(){
-  if(!audioCtx||musicPlaying)return; musicPlaying=true; scheduleDNB();
+  if(!audioCtx||musicPlaying)return;musicPlaying=true;scheduleDNB();
 }
 
-// Amen break style kick/snare patterns (16th note grid)
-const AMEN_KICK =  [1,0,0,0, 0,0,1,0, 0,1,0,0, 0,0,0,0];
-const AMEN_SNARE = [0,0,0,0, 1,0,0,1, 0,0,0,0, 1,0,0,1];
-const AMEN_HAT =   [1,0,1,1, 1,0,1,0, 1,1,1,0, 1,0,1,1];
+// DNB rhythm patterns - amen break style
+const AMEN_KICK = [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0];
+const AMEN_SNARE = [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1];
+const AMEN_HAT = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1];
 
-// Boss mode - double-time aggression
-const BOSS_KICK =  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0];
-const BOSS_SNARE = [0,0,1,0, 0,1,1,0, 0,0,1,0, 0,1,0,1];
-const BOSS_HAT =   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1];
+// Boss mode - faster, more aggressive
+const BOSS_KICK = [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0];
+const BOSS_SNARE = [0,0,1,0,0,0,1,0,0,0,1,0,0,1,0,1];
 
 function scheduleDNB(){
   if(!audioCtx||!musicPlaying)return;
-  // Normal: 170 BPM bassy DnB. Boss: 185 BPM breakneck acid
-  const bpm = bossMusicActive ? 185 : 170;
+  const bpm = bossMusicActive ? 174 : 160; // Faster for boss
   const sixD = 60/bpm/4, barD = sixD*16, now = audioCtx.currentTime;
-
+  
   for(let bar=0;bar<4;bar++){
     const chordIdx = (Math.floor(now/barD)+bar)%DNB_CHORDS.length;
     const chord = DNB_CHORDS[chordIdx];
-    const bassNote = DNB_BASS_NOTES[chordIdx];
     const barStart = now + bar*barD;
-
-    // Heavy Reese bass pad - detuned saws
+    
+    // Deep Reese bass pad
     playReesePad(chord, barStart, barD);
-
-    // Deep sub bass - pure sine, floor-shaking
-    playSubBass(bassNote, barStart, barD);
-
-    // Drum patterns
+    
+    // Sub bass - root note
+    playSubBass(chord[0]-24, barStart, barD);
+    
+    // Drum pattern
     const kick = bossMusicActive ? BOSS_KICK : AMEN_KICK;
     const snare = bossMusicActive ? BOSS_SNARE : AMEN_SNARE;
-    const hat = bossMusicActive ? BOSS_HAT : AMEN_HAT;
     for(let s=0;s<16;s++){
-      const t = barStart + s*sixD;
-      if(kick[s]) playKick(t, sixD*0.9);
-      if(snare[s]) playSnare(t, sixD*0.8);
-      if(hat[s]) playHiHat(t, sixD*0.25, s%4===0?0.07:s%2===0?0.04:0.025);
+      if(kick[s]) playKick(barStart+s*sixD, sixD*0.8);
+      if(snare[s]) playSnare(barStart+s*sixD, sixD*0.7);
+      if(AMEN_HAT[s]) playHiHat(barStart+s*sixD, sixD*0.3, s%2===0?0.06:0.03);
     }
-
-    // Acid 303 line - always present, more chaotic in boss mode
-    playAcidLine(chord, barStart, sixD);
-
-    // Dark atmospheric pad
-    if(!bossMusicActive || bar%2===0) playAtmoPad(chord, barStart, barD);
-
-    // Boss mode: extra distorted stab hits
-    if(bossMusicActive && bar%2===0) playBossStab(chord, barStart, sixD);
+    
+    // Acid 303 style line
+    if(bar%2===0 || bossMusicActive){
+      playAcidLine(chord, barStart, sixD);
+    }
+    
+    // Atmospheric pad
+    playAtmoPad(chord, barStart, barD);
   }
-
+  
   setTimeout(()=>scheduleDNB(), (barD*3.5)*1000);
 }
 
-// Heavy Reese bass - detuned sawtooth waves through resonant filter
 function playReesePad(chord,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass';
-  f.frequency.setValueAtTime(200,time);
-  f.frequency.linearRampToValueAtTime(bossMusicActive?1200:700,time+dur*0.4);
-  f.frequency.linearRampToValueAtTime(150,time+dur); f.Q.value=bossMusicActive?6:3;
+  f.type='lowpass'; f.frequency.setValueAtTime(300,time); 
+  f.frequency.linearRampToValueAtTime(800,time+dur*0.5);
+  f.frequency.linearRampToValueAtTime(200,time+dur); f.Q.value=2;
   f.connect(g); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.16 : 0.12;
-  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+dur*0.15);
-  g.gain.linearRampToValueAtTime(vol*0.7,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.3);
-
-  // 3 detuned saws for thick Reese
-  const baseFreq = midiToFreq(chord[0]);
-  const detune = [0, -0.12, 0.12];
-  for(let i=0;i<3;i++){
-    const o = audioCtx.createOscillator();
-    o.type='sawtooth';
-    o.frequency.setValueAtTime(baseFreq * Math.pow(2, detune[i]/12), time);
-    // Slow LFO modulation on frequency for movement
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.12,time+dur*0.2);
+  g.gain.linearRampToValueAtTime(0.08,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.5);
+  
+  // Detuned saw waves for that Reese sound
+  for(let i=0;i<2;i++){
+    const freq = midiToFreq(chord[0]+(i===0?0:0.1));
+    const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
+    o1.type='sawtooth'; o2.type='sawtooth';
+    o1.frequency.setValueAtTime(freq,time); o2.frequency.setValueAtTime(freq*0.995,time);
     const lfo=audioCtx.createOscillator(), lfoG=audioCtx.createGain();
-    lfo.type='sine'; lfo.frequency.value=0.3+i*0.15; lfoG.gain.value=baseFreq*0.008;
-    lfo.connect(lfoG); lfoG.connect(o.frequency);
-    o.connect(f);
-    o.start(time); o.stop(time+dur+0.4);
-    lfo.start(time); lfo.stop(time+dur+0.4);
+    lfo.type='sine'; lfo.frequency.value=0.5; lfoG.gain.value=3;
+    lfo.connect(lfoG); lfoG.connect(o1.frequency);
+    o1.connect(f); o2.connect(f);
+    o1.start(time); o2.start(time); lfo.start(time);
+    o1.stop(time+dur+0.6); o2.stop(time+dur+0.6); lfo.stop(time+dur+0.6);
   }
 }
 
-// Deep sub bass - pure sine wave, floor rumble
 function playSubBass(note,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass'; f.frequency.value=120; f.Q.value=0.7;
+  f.type='lowpass'; f.frequency.value=150; f.Q.value=1;
   f.connect(g); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.35 : 0.28;
-  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+0.02);
-  g.gain.setValueAtTime(vol,time+dur*0.3);
-  g.gain.exponentialRampToValueAtTime(vol*0.5,time+dur*0.7);
-  g.gain.linearRampToValueAtTime(0.001,time+dur+0.1);
-
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.25,time+0.02);
+  g.gain.exponentialRampToValueAtTime(0.15,time+dur*0.5); g.gain.linearRampToValueAtTime(0,time+dur+0.1);
+  
   const freq=midiToFreq(note);
-  // Sine sub + subtle triangle harmonic
-  const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
-  o1.type='sine'; o2.type='triangle';
-  o1.frequency.setValueAtTime(freq,time);
-  o2.frequency.setValueAtTime(freq,time);
-  const o2g=audioCtx.createGain(); o2g.gain.value=0.15;
-  o1.connect(f); o2.connect(o2g); o2g.connect(f);
-  o1.start(time); o2.start(time);
-  o1.stop(time+dur+0.2); o2.stop(time+dur+0.2);
+  const o=audioCtx.createOscillator();
+  o.type='sine';
+  o.frequency.setValueAtTime(freq,time);
+  o.connect(f); o.start(time); o.stop(time+dur+0.2);
 }
 
-// Punchy kick drum with sub weight
 function playKick(time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.45 : 0.38;
-  g.gain.setValueAtTime(vol,time);
+  g.gain.setValueAtTime(bossMusicActive?0.4:0.35,time);
   g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-
-  // Pitch sweep from 160Hz down to 35Hz
+  
   const o=audioCtx.createOscillator();
-  o.frequency.setValueAtTime(160,time);
-  o.frequency.exponentialRampToValueAtTime(35,time+0.06);
+  o.frequency.setValueAtTime(150,time);
+  o.frequency.exponentialRampToValueAtTime(30,time+0.05);
   o.connect(g); o.start(time); o.stop(time+dur);
-
-  // Click transient for attack
+  
+  // Click transient
   const click=audioCtx.createOscillator(), cg=audioCtx.createGain();
-  click.type='square'; click.frequency.value=1200;
-  cg.gain.setValueAtTime(0.1,time); cg.gain.exponentialRampToValueAtTime(0.001,time+0.008);
-  click.connect(cg); cg.connect(musicGain); click.start(time); click.stop(time+0.015);
-
-  // Sub layer for extra bass weight
-  const sub=audioCtx.createOscillator(), sg=audioCtx.createGain();
-  sub.type='sine'; sub.frequency.setValueAtTime(55,time);
-  sg.gain.setValueAtTime(0.25,time); sg.gain.exponentialRampToValueAtTime(0.001,time+dur*0.8);
-  sub.connect(sg); sg.connect(musicGain); sub.start(time); sub.stop(time+dur);
+  click.type='square'; click.frequency.value=1000;
+  cg.gain.setValueAtTime(0.08,time); cg.gain.exponentialRampToValueAtTime(0.001,time+0.01);
+  click.connect(cg); cg.connect(musicGain); click.start(time); click.stop(time+0.02);
 }
 
-// Snappy snare with noise burst
 function playSnare(time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(); g.connect(musicGain);
-  g.gain.setValueAtTime(bossMusicActive?0.28:0.22,time);
+  g.gain.setValueAtTime(bossMusicActive?0.25:0.2,time);
   g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-
-  // Noise component
+  
+  // Noise burst
   const bs=audioCtx.sampleRate*dur, buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
   const d=buf.getChannelData(0);
   for(let i=0;i<bs;i++) d[i]=(Math.random()*2-1);
-  const noise=audioCtx.createBufferSource(); noise.buffer=buf;
-  const nf=audioCtx.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=4000; nf.Q.value=1.2;
-  const ng=audioCtx.createGain(); ng.gain.setValueAtTime(0.35,time); ng.gain.exponentialRampToValueAtTime(0.001,time+dur*0.6);
+  const noise=audioCtx.createBufferSource();
+  noise.buffer=buf;
+  const nf=audioCtx.createBiquadFilter();
+  nf.type='highpass'; nf.frequency.value=2000;
+  const ng=audioCtx.createGain();
+  ng.gain.setValueAtTime(0.15,time); ng.gain.exponentialRampToValueAtTime(0.001,time+dur*0.5);
   noise.connect(nf); nf.connect(ng); ng.connect(musicGain);
   noise.start(time); noise.stop(time+dur);
-
-  // Tonal body
-  const o=audioCtx.createOscillator(); o.type='triangle';
-  o.frequency.setValueAtTime(220,time); o.frequency.exponentialRampToValueAtTime(120,time+0.03);
+  
+  // Body
+  const o=audioCtx.createOscillator();
+  o.type='triangle'; o.frequency.setValueAtTime(200,time);
+  o.frequency.exponentialRampToValueAtTime(100,time+0.05);
   o.connect(g); o.start(time); o.stop(time+dur);
 }
 
-// Crisp hi-hat from filtered noise
 function playHiHat(time,dur,vol){
   if(!audioCtx)return;
   const bs=audioCtx.sampleRate*dur, buf=audioCtx.createBuffer(1,bs,audioCtx.sampleRate);
   const d=buf.getChannelData(0);
   for(let i=0;i<bs;i++) d[i]=(Math.random()*2-1);
-  const src=audioCtx.createBufferSource(); src.buffer=buf;
-  const f=audioCtx.createBiquadFilter(); f.type='highpass'; f.frequency.value=9000;
-  const f2=audioCtx.createBiquadFilter(); f2.type='bandpass'; f2.frequency.value=12000; f2.Q.value=1;
+  const src=audioCtx.createBufferSource();
+  src.buffer=buf;
+  const f=audioCtx.createBiquadFilter();
+  f.type='highpass'; f.frequency.value=8000;
   const g=audioCtx.createGain();
   g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.001,time+dur);
-  src.connect(f); f.connect(f2); f2.connect(g); g.connect(musicGain);
+  src.connect(f); f.connect(g); g.connect(musicGain);
   src.start(time); src.stop(time+dur);
 }
 
-// TB-303 style acid line - resonant sawtooth with filter sweeps
 function playAcidLine(chord,startTime,sixD){
   if(!audioCtx)return;
-  // Build scale from chord tones + chromatic passing tones for acid feel
-  const root=chord[0], third=chord[1], fifth=chord[2];
-  const scale = bossMusicActive
-    ? [root,root+1,third,third+1,fifth,fifth+2,root+12,third+12,fifth+12,root+13]
-    : [root,third,fifth,root+12,fifth+12,root+7];
-  const noteCount = bossMusicActive ? 10 : 6;
-  const baseVol = bossMusicActive ? 0.11 : 0.08;
-
-  for(let i=0;i<noteCount;i++){
-    const t = startTime + i*sixD*(bossMusicActive ? 1 : 2);
-    const note = scale[i%scale.length] + 12;
-    const dur = sixD*(bossMusicActive ? 1.2 : 2.5);
-
+  const scale=[chord[0],chord[2],chord[1],chord[0]+12,chord[2]+12,chord[0]];
+  const notes=bossMusicActive?6:4;
+  
+  for(let i=0;i<notes;i++){
+    const t=startTime+i*sixD*(bossMusicActive?1:2);
+    const note=scale[i%scale.length]+12;
+    const dur=sixD*(bossMusicActive?1.5:3);
+    
     const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
     f.type='lowpass';
-    // Classic 303 filter sweep - start low, sweep up, fall back
-    const startFreq = 300 + Math.random()*400;
-    const peakFreq = bossMusicActive ? (3000+Math.random()*2000) : (1800+Math.random()*1200);
-    f.frequency.setValueAtTime(startFreq,t);
-    f.frequency.linearRampToValueAtTime(peakFreq,t+dur*0.25);
-    f.frequency.exponentialRampToValueAtTime(startFreq*0.8,t+dur);
-    f.Q.value = 18 + Math.random()*12; // High resonance for that acid squelch
+    f.frequency.setValueAtTime(400+Math.random()*800,t);
+    f.frequency.linearRampToValueAtTime(2000+Math.random()*1000,t+dur*0.3);
+    f.frequency.linearRampToValueAtTime(400,t+dur);
+    f.Q.value=15+Math.random()*10; // Resonant!
     f.connect(g); g.connect(musicGain);
-    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(baseVol,t+0.005);
-    g.gain.setValueAtTime(baseVol*0.9,t+dur*0.3);
-    g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-
+    g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.08,t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.02,t+dur*0.5);
+    g.gain.linearRampToValueAtTime(0.001,t+dur);
+    
     const o=audioCtx.createOscillator();
     o.type='sawtooth';
     o.frequency.setValueAtTime(midiToFreq(note),t);
-    // Acid slides - portamento between notes
-    if(Math.random() < (bossMusicActive ? 0.5 : 0.3)){
-      const slideNote = note + (Math.random()<0.5 ? 3 : -2);
-      o.frequency.linearRampToValueAtTime(midiToFreq(slideNote),t+dur*0.4);
+    // Slide
+    if(Math.random()<0.3){
+      o.frequency.linearRampToValueAtTime(midiToFreq(note+(Math.random()<0.5?3:-2)),t+dur*0.5);
     }
-    // Accent some notes
-    if(i%3===0){
-      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(baseVol*1.4,t+0.003);
-    }
-    o.connect(f); o.start(t); o.stop(t+dur+0.05);
+    o.connect(f); o.start(t); o.stop(t+dur+0.1);
   }
 }
 
-// Dark atmospheric pad
 function playAtmoPad(chord,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass'; f.frequency.value=bossMusicActive?800:1000; f.Q.value=1.5;
+  f.type='lowpass'; f.frequency.value=1200; f.Q.value=1;
   f.connect(g); g.connect(musicGain);
-  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.035,time+dur*0.35);
-  g.gain.linearRampToValueAtTime(0.025,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.4);
-
-  for(let i=1;i<Math.min(4,chord.length);i++){
-    const freq=midiToFreq(chord[i]+24);
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(0.04,time+dur*0.3);
+  g.gain.linearRampToValueAtTime(0.03,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.3);
+  
+  for(let i=2;i<Math.min(4,chord.length);i++){
+    const freq=midiToFreq(chord[i]+12);
     const o=audioCtx.createOscillator();
     o.type='sine';
     o.frequency.setValueAtTime(freq,time);
-    // Slow vibrato
-    const vib=audioCtx.createOscillator(), vibG=audioCtx.createGain();
-    vib.type='sine'; vib.frequency.value=0.3; vibG.gain.value=freq*0.003;
-    vib.connect(vibG); vibG.connect(o.frequency);
     o.connect(f); o.start(time); o.stop(time+dur+0.5);
-    vib.start(time); vib.stop(time+dur+0.5);
-  }
-}
-
-// Boss mode stab - distorted chord hit
-function playBossStab(chord,time,sixD){
-  if(!audioCtx)return;
-  const hits = [0, 3, 6, 8, 12]; // Rhythmic pattern in 16th notes
-  for(const h of hits){
-    const t = time + h*sixD;
-    const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter(), dist=audioCtx.createWaveShaperFunction ? null : null;
-    f.type='bandpass'; f.frequency.value=1200+Math.random()*800; f.Q.value=4;
-    f.connect(g); g.connect(musicGain);
-    g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+sixD*1.5);
-    for(let i=0;i<3;i++){
-      const o=audioCtx.createOscillator();
-      o.type='sawtooth';
-      o.frequency.setValueAtTime(midiToFreq(chord[i%chord.length]+12),t);
-      o.connect(f); o.start(t); o.stop(t+sixD*2);
-    }
   }
 }
 
 function playSFX(freq,type,dur,vol){
   if(!audioCtx)return;
-  const g=audioCtx.createGain(); g.connect(compressor||audioCtx.destination);
+  const g=audioCtx.createGain(); g.connect(audioCtx.destination);
   g.gain.setValueAtTime(vol||0.1,audioCtx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+(dur||0.1));
   const o=audioCtx.createOscillator();
@@ -332,7 +255,7 @@ function playSFX(freq,type,dur,vol){
 function toggleMusic(){
   if(!musicGain)return;
   musicMuted=!musicMuted;
-  musicGain.gain.linearRampToValueAtTime(musicMuted?0:0.45,audioCtx.currentTime+0.3);
+  musicGain.gain.linearRampToValueAtTime(musicMuted?0:0.4,audioCtx.currentTime+0.3);
 }
 
 // INPUT
@@ -341,49 +264,6 @@ window.addEventListener('keydown', e => {
   keys[e.key] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   if (e.key === 'm' || e.key === 'M') toggleMusic();
-  
-  // WASD navigation for ship selection screen
-  if (gameState === 'shipSelect') {
-    if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-      shipHoverIdx = shipHoverIdx <= 0 ? 2 : shipHoverIdx - 1;
-    } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-      shipHoverIdx = shipHoverIdx >= 2 ? 0 : shipHoverIdx + 1;
-    } else if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
-      shipHoverIdx = shipHoverIdx <= 0 ? 2 : shipHoverIdx - 1;
-    } else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') {
-      shipHoverIdx = shipHoverIdx >= 2 ? 0 : shipHoverIdx + 1;
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      if (shipHoverIdx >= 0) {
-        player = createPlayer(shipHoverIdx);
-        level = 1; score = 0; credits = 0; enemiesKilled = 0; enemiesSpawned = 0; enemiesNeeded = 12;
-        bossActive = false; boss = null;
-        bullets = []; enemies = []; enemyBullets = []; pickups = []; particles = []; creditPopups = [];
-        spawnTimer = 0; transitionTimer = 0;
-        gameState = 'playing';
-      }
-    }
-    e.preventDefault();
-  }
-  
-  // WASD navigation for upgrade selection screen
-  if (gameState === 'upgradeScreen') {
-    const numOpts = upgradeOptions.length;
-    if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp' || e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-      upgradeHoverIdx = upgradeHoverIdx <= 0 ? numOpts : upgradeHoverIdx - 1;
-    } else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown' || e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-      upgradeHoverIdx = upgradeHoverIdx >= numOpts ? 0 : upgradeHoverIdx + 1;
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      // If hovering the skip button (last index = numOpts), skip
-      if (upgradeHoverIdx === numOpts) {
-        gameState = 'playing';
-      } else if (upgradeHoverIdx < numOpts && credits >= upgradeOptions[upgradeHoverIdx].cost) {
-        applyUpgrade(upgradeHoverIdx);
-      }
-    } else if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') {
-      gameState = 'playing';
-    }
-    e.preventDefault();
-  }
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
 let mouseX = W/2, mouseY = H/2, mouseClicked = false, _pendingClick = false;
@@ -848,7 +728,7 @@ function updateSpawning() {
   if (bossActive) return;
   if (transitionTimer>0) {
     transitionTimer--;
-    if (transitionTimer===0) { upgradeOptions=generateUpgradeOptions(); gameState='upgradeScreen'; upgradeHoverIdx=0; }
+    if (transitionTimer===0) { upgradeOptions=generateUpgradeOptions(); gameState='upgradeScreen'; }
     return;
   }
   if (enemiesSpawned < enemiesNeeded) {
@@ -917,37 +797,30 @@ function drawUpgradeScreen() {
   for (let i=0;i<upgradeOptions.length;i++) {
     const opt=upgradeOptions[i], bx=W/2-boxW/2, by=startY+i*(boxH+14);
     const hover=mouseX>=bx&&mouseX<=bx+boxW&&mouseY>=by&&mouseY<=by+boxH;
-    const isKeyboardSelected = (upgradeHoverIdx === i);
-    if (hover && !isKeyboardSelected) { selectedUpgrade=i; upgradeHoverIdx=i; }
-    if (isKeyboardSelected) selectedUpgrade=i;
+    if (hover) selectedUpgrade=i;
     const canAfford = credits >= opt.cost;
     const col=opt.type==='evolve'?COLORS.magenta:opt.type==='repair'?COLORS.green:opt.type==='speed'?COLORS.cyan:opt.type==='slot'?COLORS.pink:COLORS.yellow;
     const dispCol = canAfford ? col : '#555555';
-    const highlighted = (hover || isKeyboardSelected) && canAfford;
-    ctx.strokeStyle=highlighted?'#ffffff':dispCol; ctx.lineWidth=highlighted?3:1;
-    ctx.shadowColor=dispCol; ctx.shadowBlur=highlighted?15:5;
-    ctx.fillStyle=hexAlpha(dispCol,highlighted?0.2:0.05); ctx.fillRect(bx,by,boxW,boxH); ctx.strokeRect(bx,by,boxW,boxH); ctx.shadowBlur=0;
+    ctx.strokeStyle=hover&&canAfford?'#ffffff':dispCol; ctx.lineWidth=hover&&canAfford?3:1;
+    ctx.shadowColor=dispCol; ctx.shadowBlur=hover&&canAfford?15:5;
+    ctx.fillStyle=hexAlpha(dispCol,hover&&canAfford?0.2:0.05); ctx.fillRect(bx,by,boxW,boxH); ctx.strokeRect(bx,by,boxW,boxH); ctx.shadowBlur=0;
     const label=opt.type==='evolve'?'EVOLVE':opt.type==='repair'?'REPAIR':opt.type==='speed'?'SPEED':opt.type==='slot'?'SLOT':'ARMOR';
     drawNeonText(label,W/2-80,by+28,16,dispCol);
     drawNeonText(opt.desc,W/2+20,by+28,11,canAfford?COLORS.white:'#666666');
     const costCol = canAfford ? COLORS.yellow : COLORS.red;
     drawNeonText(opt.cost+' cr',W/2+160,by+55,13,costCol);
     if (!canAfford) drawNeonText('INSUFFICIENT',W/2-60,by+55,10,COLORS.red);
-    else if (hover || isKeyboardSelected) drawNeonText('[ CLICK or ENTER ]',W/2-60,by+55,10,'#ffffff');
+    else if (hover) drawNeonText('[ CLICK TO BUY ]',W/2-60,by+55,10,'#ffffff');
   }
   if (mouseClicked && selectedUpgrade>=0 && credits>=upgradeOptions[selectedUpgrade].cost) applyUpgrade(selectedUpgrade);
   // Skip button - always available
   const skipY=startY+upgradeOptions.length*(boxH+14)+10;
   const skipW=160,skipH=36,skipX=W/2-skipW/2;
   const skipHover=mouseX>=skipX&&mouseX<=skipX+skipW&&mouseY>=skipY&&mouseY<=skipY+skipH;
-  const skipKeySelected = (upgradeHoverIdx === upgradeOptions.length);
-  if (skipHover && !skipKeySelected) upgradeHoverIdx = upgradeOptions.length;
-  const skipHighlighted = skipHover || skipKeySelected;
-  ctx.strokeStyle=skipHighlighted?'#fff':'#666';ctx.lineWidth=skipHighlighted?2:1;
-  ctx.shadowColor='#666';ctx.shadowBlur=skipHighlighted?10:0;
-  ctx.fillStyle=hexAlpha('#666666',skipHighlighted?0.2:0.05);ctx.fillRect(skipX,skipY,skipW,skipH);ctx.strokeRect(skipX,skipY,skipW,skipH);ctx.shadowBlur=0;
-  drawNeonText(skipHighlighted?'[ SKIP - ENTER/ESC ]':'SKIP (ESC/Q)',W/2,skipY+18,11,skipHighlighted?COLORS.white:'#888888');
-  if (mouseClicked&&skipHighlighted) gameState='playing';
+  ctx.strokeStyle=skipHover?'#fff':'#666';ctx.lineWidth=skipHover?2:1;
+  ctx.fillStyle=hexAlpha('#666666',skipHover?0.15:0.05);ctx.fillRect(skipX,skipY,skipW,skipH);ctx.strokeRect(skipX,skipY,skipW,skipH);
+  drawNeonText('SKIP (save credits)',W/2,skipY+18,11,skipHover?COLORS.white:'#888888');
+  if (mouseClicked&&skipHover) gameState='playing';
   drawNeonText('Score: '+score,W/2,H-30,14,COLORS.yellow);
 }
 
@@ -984,7 +857,7 @@ function drawMenu() {
   const t=Date.now()*0.001;
   drawNeonText('NEON VOID RUNNER',W/2,140,44,COLORS.cyan);
   drawNeonText('SCI-FI SIDE SCROLLER',W/2,190,16,COLORS.magenta);
-  drawNeonText('\u266b bassy drum & bass / acid \u266b',W/2,220,12,'#888888');
+  drawNeonText('\u266b ambient scifi bossa nova \u266b',W/2,220,12,'#888888');
   const demoShip=SHIP_DEFS[Math.floor(t)%3];
   drawShip(W/2+Math.sin(t*2)*30,310+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=400;
@@ -995,25 +868,22 @@ function drawMenu() {
   drawNeonText('High Score: '+hiScore,W/2,500,14,COLORS.orange);
   drawNeonText('Click anywhere to start music',W/2,535,11,'#666666');
   drawNeonText('[M] Toggle Music  |  WASD/Arrows to Move',W/2,560,10,'#555555');
-  if (mouseClicked&&hover) { gameState='shipSelect'; shipHoverIdx=0; }
+  if (mouseClicked&&hover) gameState='shipSelect';
 }
 
 function drawShipSelect() {
   drawBackground(); updateStars();
   drawNeonText('SELECT YOUR SHIP',W/2,50,32,COLORS.cyan);
-  drawNeonText('WASD / Arrow Keys to select — ENTER or SPACE to confirm',W/2,85,12,'#888888');
   const cardW=250,cardH=320,gap=30,startX=W/2-(cardW*1.5+gap);
-  if (shipHoverIdx < 0) shipHoverIdx = 0;
+  shipHoverIdx=-1;
   for (let i=0;i<3;i++) {
     const def=SHIP_DEFS[i], cx=startX+i*(cardW+gap)+cardW/2, cy=H/2+20;
     const bx=cx-cardW/2, by=cy-cardH/2;
     const hover=mouseX>=bx&&mouseX<=bx+cardW&&mouseY>=by&&mouseY<=by+cardH;
-    const isSelected = (shipHoverIdx === i);
-    if (hover && !isSelected) shipHoverIdx=i;
-    const highlighted = hover || isSelected;
-    ctx.strokeStyle=highlighted?'#fff':def.color; ctx.lineWidth=highlighted?3:1;
-    ctx.shadowColor=def.color; ctx.shadowBlur=highlighted?20:8;
-    ctx.fillStyle=hexAlpha(def.color,highlighted?0.15:0.05);
+    if (hover) shipHoverIdx=i;
+    ctx.strokeStyle=hover?'#fff':def.color; ctx.lineWidth=hover?3:1;
+    ctx.shadowColor=def.color; ctx.shadowBlur=hover?20:8;
+    ctx.fillStyle=hexAlpha(def.color,hover?0.15:0.05);
     ctx.fillRect(bx,by,cardW,cardH); ctx.strokeRect(bx,by,cardW,cardH); ctx.shadowBlur=0;
     drawShip(cx,cy-80,def,def.color,1.8);
     drawNeonText(def.name,cx,cy-10,22,def.color);
@@ -1021,7 +891,7 @@ function drawShipSelect() {
     drawNeonText('Speed: '+def.speed,cx,cy+50,12,COLORS.cyan);
     drawNeonText('Armor: '+def.maxArmor,cx,cy+70,12,COLORS.orange);
     drawNeonText('Slots: '+def.weaponSlots,cx,cy+90,12,COLORS.green);
-    if (isSelected) drawNeonText('[ CLICK or ENTER ]',cx,cy+120,14,'#ffffff');
+    if (hover) drawNeonText('[ CLICK TO SELECT ]',cx,cy+120,14,'#ffffff');
   }
   if (mouseClicked && shipHoverIdx>=0) {
     player=createPlayer(shipHoverIdx);
@@ -1044,7 +914,7 @@ function drawGameOver() {
   ctx.strokeStyle=hover?'#fff':COLORS.cyan;ctx.lineWidth=hover?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=hover?20:10;
   ctx.fillStyle=hexAlpha(COLORS.cyan,hover?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
   drawNeonText('RETRY',W/2,btnY+25,20,COLORS.cyan);
-  if (mouseClicked&&hover) { gameState='shipSelect'; shipHoverIdx=0; }
+  if (mouseClicked&&hover) gameState='shipSelect';
 }
 
 // MAIN LOOP
