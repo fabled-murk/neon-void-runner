@@ -26,8 +26,8 @@ let creditPopups = [];
 
 // ============================================
 // ============================================
-// BASSY DRUM & BASS / ACID SOUNDTRACK
-// Procedural synthesized audio - heavy sub bass, resonant acid lines
+// DRUM & BASS SOUNDTRACK
+// Procedural synthesized audio - clean DnB: deep sub bass, amen breaks, atmospheric pads
 // Boss levels switch to faster, more energetic tempo
 // ============================================
 let audioCtx = null, musicPlaying = false, musicGain = null, musicMuted = false;
@@ -70,7 +70,7 @@ const BOSS_HAT =   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1];
 
 function scheduleDNB(){
   if(!audioCtx||!musicPlaying)return;
-  // Normal: 170 BPM bassy DnB. Boss: 185 BPM breakneck acid
+  // Normal: 170 BPM deep DnB. Boss: 185 BPM intense breaks
   const bpm = bossMusicActive ? 185 : 170;
   const sixD = 60/bpm/4, barD = sixD*16, now = audioCtx.currentTime;
 
@@ -80,8 +80,8 @@ function scheduleDNB(){
     const bassNote = DNB_BASS_NOTES[chordIdx];
     const barStart = now + bar*barD;
 
-    // Heavy Reese bass pad - detuned saws
-    playReesePad(chord, barStart, barD);
+    // Warm harmonic pad
+    playWarmPad(chord, barStart, barD);
 
     // Deep sub bass - pure sine, floor-shaking
     playSubBass(bassNote, barStart, barD);
@@ -97,46 +97,48 @@ function scheduleDNB(){
       if(hat[s]) playHiHat(t, sixD*0.25, s%4===0?0.07:s%2===0?0.04:0.025);
     }
 
-    // Acid 303 line - always present, more chaotic in boss mode
-    playAcidLine(chord, barStart, sixD);
+    // Subtle synth stab - only in boss mode for tension
+    if(bossMusicActive && bar%2===0) playSynthStab(chord, barStart, sixD);
 
     // Dark atmospheric pad
     if(!bossMusicActive || bar%2===0) playAtmoPad(chord, barStart, barD);
 
-    // Boss mode: extra distorted stab hits
-    if(bossMusicActive && bar%2===0) playBossStab(chord, barStart, sixD);
+    // Rhythmic bass fills on off-beats
+    if(bar%2===1) playBassFill(chord, barStart, sixD);
+    
+
   }
 
   setTimeout(()=>scheduleDNB(), (barD*3.5)*1000);
 }
 
-// Heavy Reese bass - detuned sawtooth waves through resonant filter
-function playReesePad(chord,time,dur){
+// Warm sine pad - gentle harmonic wash
+function playWarmPad(chord,time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  f.type='lowpass';
-  f.frequency.setValueAtTime(200,time);
-  f.frequency.linearRampToValueAtTime(bossMusicActive?1200:700,time+dur*0.4);
-  f.frequency.linearRampToValueAtTime(150,time+dur); f.Q.value=bossMusicActive?6:3;
+  f.type='lowpass'; f.frequency.value=600; f.Q.value=0.3;
   f.connect(g); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.16 : 0.12;
-  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+dur*0.15);
-  g.gain.linearRampToValueAtTime(vol*0.7,time+dur*0.7); g.gain.linearRampToValueAtTime(0,time+dur+0.3);
+  const vol = bossMusicActive ? 0.05 : 0.035;
+  g.gain.setValueAtTime(0,time); g.gain.linearRampToValueAtTime(vol,time+dur*0.4);
+  g.gain.linearRampToValueAtTime(vol*0.5,time+dur*0.8); g.gain.linearRampToValueAtTime(0,time+dur+0.6);
 
-  // 3 detuned saws for thick Reese
-  const baseFreq = midiToFreq(chord[0]);
-  const detune = [0, -0.12, 0.12];
   for(let i=0;i<3;i++){
-    const o = audioCtx.createOscillator();
-    o.type='sawtooth';
-    o.frequency.setValueAtTime(baseFreq * Math.pow(2, detune[i]/12), time);
-    // Slow LFO modulation on frequency for movement
+    const noteIdx = [0, 2, 3][i];
+    if(noteIdx >= chord.length) continue;
+    const freq = midiToFreq(chord[noteIdx] + 12);
+    const o1 = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
+    o1.type='sine'; o2.type='triangle';
+    o1.frequency.setValueAtTime(freq, time);
+    o2.frequency.setValueAtTime(freq*1.001, time);
+    // Gentle LFO for movement
     const lfo=audioCtx.createOscillator(), lfoG=audioCtx.createGain();
-    lfo.type='sine'; lfo.frequency.value=0.3+i*0.15; lfoG.gain.value=baseFreq*0.008;
-    lfo.connect(lfoG); lfoG.connect(o.frequency);
-    o.connect(f);
-    o.start(time); o.stop(time+dur+0.4);
-    lfo.start(time); lfo.stop(time+dur+0.4);
+    lfo.type='sine'; lfo.frequency.value=0.2+i*0.1; lfoG.gain.value=freq*0.002;
+    lfo.connect(lfoG); lfoG.connect(o1.frequency);
+    const mix=audioCtx.createGain(); mix.gain.value=0.3;
+    o1.connect(f); o2.connect(mix); mix.connect(f);
+    o1.start(time); o2.start(time); lfo.start(time);
+    o1.stop(time+dur+0.7); o2.stop(time+dur+0.7); lfo.stop(time+dur+0.7);
   }
 }
 
@@ -168,7 +170,7 @@ function playSubBass(note,time,dur){
 function playKick(time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(); g.connect(musicGain);
-  const vol = bossMusicActive ? 0.45 : 0.38;
+  const vol = bossMusicActive ? 0.55 : 0.48;
   g.gain.setValueAtTime(vol,time);
   g.gain.exponentialRampToValueAtTime(0.001,time+dur);
 
@@ -195,7 +197,7 @@ function playKick(time,dur){
 function playSnare(time,dur){
   if(!audioCtx)return;
   const g=audioCtx.createGain(); g.connect(musicGain);
-  g.gain.setValueAtTime(bossMusicActive?0.28:0.22,time);
+  g.gain.setValueAtTime(bossMusicActive?0.38:0.32,time);
   g.gain.exponentialRampToValueAtTime(0.001,time+dur);
 
   // Noise component
@@ -229,50 +231,50 @@ function playHiHat(time,dur,vol){
   src.start(time); src.stop(time+dur);
 }
 
-// TB-303 style acid line - resonant sawtooth with filter sweeps
-function playAcidLine(chord,startTime,sixD){
+// DnB bass fill - rhythmic sub hits on off-beats
+function playBassFill(chord,startTime,sixD){
   if(!audioCtx)return;
-  // Build scale from chord tones + chromatic passing tones for acid feel
-  const root=chord[0], third=chord[1], fifth=chord[2];
-  const scale = bossMusicActive
-    ? [root,root+1,third,third+1,fifth,fifth+2,root+12,third+12,fifth+12,root+13]
-    : [root,third,fifth,root+12,fifth+12,root+7];
-  const noteCount = bossMusicActive ? 10 : 6;
-  const baseVol = bossMusicActive ? 0.11 : 0.08;
-
-  for(let i=0;i<noteCount;i++){
-    const t = startTime + i*sixD*(bossMusicActive ? 1 : 2);
-    const note = scale[i%scale.length] + 12;
-    const dur = sixD*(bossMusicActive ? 1.2 : 2.5);
-
+  const root = chord[0];
+  const pattern = bossMusicActive ? [0,3,6,8,10,12,14] : [0,4,8,12];
+  for(const step of pattern){
+    const t = startTime + step*sixD;
+    const dur = sixD * 0.8;
     const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-    f.type='lowpass';
-    // Classic 303 filter sweep - start low, sweep up, fall back
-    const startFreq = 300 + Math.random()*400;
-    const peakFreq = bossMusicActive ? (3000+Math.random()*2000) : (1800+Math.random()*1200);
-    f.frequency.setValueAtTime(startFreq,t);
-    f.frequency.linearRampToValueAtTime(peakFreq,t+dur*0.25);
-    f.frequency.exponentialRampToValueAtTime(startFreq*0.8,t+dur);
-    f.Q.value = 18 + Math.random()*12; // High resonance for that acid squelch
+    f.type='lowpass'; f.frequency.value=200; f.Q.value=0.5;
     f.connect(g); g.connect(musicGain);
-    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(baseVol,t+0.005);
-    g.gain.setValueAtTime(baseVol*0.9,t+dur*0.3);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.15,t+0.01);
     g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-
+    const note = root + (step%3===0 ? 0 : step%3===1 ? 7 : 5);
     const o=audioCtx.createOscillator();
-    o.type='sawtooth';
+    o.type='sine';
     o.frequency.setValueAtTime(midiToFreq(note),t);
-    // Acid slides - portamento between notes
-    if(Math.random() < (bossMusicActive ? 0.5 : 0.3)){
-      const slideNote = note + (Math.random()<0.5 ? 3 : -2);
-      o.frequency.linearRampToValueAtTime(midiToFreq(slideNote),t+dur*0.4);
-    }
-    // Accent some notes
-    if(i%3===0){
-      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(baseVol*1.4,t+0.003);
-    }
+    o.frequency.exponentialRampToValueAtTime(midiToFreq(note)*0.9,t+dur);
     o.connect(f); o.start(t); o.stop(t+dur+0.05);
   }
+}
+
+// Subtle synth stab for boss tension
+function playSynthStab(chord,time,sixD){
+  if(!audioCtx)return;
+  const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
+  f.type='lowpass'; f.frequency.value=2500; f.Q.value=1;
+  f.connect(g); g.connect(musicGain);
+  
+  // Just play the chord root as a quick stab
+  const freq = midiToFreq(chord[0] + 24);
+  const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator();
+  o1.type='triangle'; o2.type='sine';
+  o1.frequency.setValueAtTime(freq, time);
+  o2.frequency.setValueAtTime(freq*0.5, time);
+  
+  g.gain.setValueAtTime(0, time);
+  g.gain.linearRampToValueAtTime(0.06, time + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, time + sixD * 2);
+  
+  o1.connect(f); o2.connect(f);
+  o1.start(time); o2.start(time);
+  o1.stop(time + sixD * 2.5); o2.stop(time + sixD * 2.5);
 }
 
 // Dark atmospheric pad
@@ -295,25 +297,6 @@ function playAtmoPad(chord,time,dur){
     vib.connect(vibG); vibG.connect(o.frequency);
     o.connect(f); o.start(time); o.stop(time+dur+0.5);
     vib.start(time); vib.stop(time+dur+0.5);
-  }
-}
-
-// Boss mode stab - distorted chord hit
-function playBossStab(chord,time,sixD){
-  if(!audioCtx)return;
-  const hits = [0, 3, 6, 8, 12]; // Rhythmic pattern in 16th notes
-  for(const h of hits){
-    const t = time + h*sixD;
-    const g=audioCtx.createGain(), f=audioCtx.createBiquadFilter(), dist=audioCtx.createWaveShaperFunction ? null : null;
-    f.type='bandpass'; f.frequency.value=1200+Math.random()*800; f.Q.value=4;
-    f.connect(g); g.connect(musicGain);
-    g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+sixD*1.5);
-    for(let i=0;i<3;i++){
-      const o=audioCtx.createOscillator();
-      o.type='sawtooth';
-      o.frequency.setValueAtTime(midiToFreq(chord[i%chord.length]+12),t);
-      o.connect(f); o.start(t); o.stop(t+sixD*2);
-    }
   }
 }
 
@@ -984,7 +967,7 @@ function drawMenu() {
   const t=Date.now()*0.001;
   drawNeonText('NEON VOID RUNNER',W/2,140,44,COLORS.cyan);
   drawNeonText('SCI-FI SIDE SCROLLER',W/2,190,16,COLORS.magenta);
-  drawNeonText('\u266b bassy drum & bass / acid \u266b',W/2,220,12,'#888888');
+  drawNeonText('\u266b drum & bass \u266b',W/2,220,12,'#888888');
   const demoShip=SHIP_DEFS[Math.floor(t)%3];
   drawShip(W/2+Math.sin(t*2)*30,310+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=400;
