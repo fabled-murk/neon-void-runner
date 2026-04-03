@@ -7,12 +7,16 @@ A sci-fi themed side-scrolling shooter with neon aesthetics, weapon upgrades, an
 ## 🎮 How to Play
 
 1. Open `index.html` in any modern browser
-2. Choose your ship from 3 unique options
-3. Use **WASD** or **Arrow Keys** to move
-4. Weapons fire automatically!
-5. Pick up weapon drops and health from defeated enemies
-6. Between levels, choose an upgrade to evolve your weapons
-7. Face a boss every 10 levels!
+2. Press **ENTER** or **SPACE** to start
+3. Choose your ship with **W/A/S/D** or **Arrow Keys**, confirm with **ENTER**
+4. Use **WASD** or **Arrow Keys** to move your ship
+5. Weapons fire automatically!
+6. Pick up weapon drops and health from defeated enemies
+7. Between levels, navigate upgrades with **W/A/S/D** and confirm with **ENTER**
+8. Face a boss every 10 levels!
+
+> 🎹 **Keyboard-only game** — no mouse required! All menus and buttons are fully navigable with WASD/Arrows and Enter.
+> Press **[M]** to toggle music. Press **ESC/Q** to skip upgrades.
 
 ## 🚀 Ships
 

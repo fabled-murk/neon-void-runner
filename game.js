@@ -23,6 +23,7 @@ let stars = [], nebulae = [], bullets = [], enemies = [];
 let player = null, upgradeOptions = [], selectedUpgrade = -1, shipHoverIdx = -1, upgradeHoverIdx = 0;
 let frameCt = 0;
 let creditPopups = [];
+let menuBtnSelected = true, gameOverBtnSelected = true;
 
 // ============================================
 // ============================================
@@ -324,6 +325,31 @@ window.addEventListener('keydown', e => {
   keys[e.key] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   if (e.key === 'm' || e.key === 'M') toggleMusic();
+
+  // Menu screen - Enter/Space to start
+  if (gameState === 'menu') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      initAudio(); startMusic();
+      gameState = 'shipSelect'; shipHoverIdx = 0;
+      e.preventDefault();
+    }
+  }
+
+  // Game Over screen - Enter/Space to retry
+  if (gameState === 'gameOver') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      gameState = 'shipSelect'; shipHoverIdx = 0;
+      e.preventDefault();
+    }
+  }
+
+  // Boss Warning - Enter/Space to skip warning
+  if (gameState === 'bossWarning') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      warningTimer = 0; gameState = 'playing';
+      e.preventDefault();
+    }
+  }
   
   // WASD navigation for ship selection screen
   if (gameState === 'shipSelect') {
@@ -916,7 +942,7 @@ function drawUpgradeScreen() {
     const costCol = canAfford ? COLORS.yellow : COLORS.red;
     drawNeonText(opt.cost+' cr',W/2+160,by+55,13,costCol);
     if (!canAfford) drawNeonText('INSUFFICIENT',W/2-60,by+55,10,COLORS.red);
-    else if (hover || isKeyboardSelected) drawNeonText('[ CLICK or ENTER ]',W/2-60,by+55,10,'#ffffff');
+    else if (hover || isKeyboardSelected) drawNeonText('[ ENTER to select ]',W/2-60,by+55,10,'#ffffff');
   }
   if (mouseClicked && selectedUpgrade>=0 && credits>=upgradeOptions[selectedUpgrade].cost) applyUpgrade(selectedUpgrade);
   // Skip button - always available
@@ -929,7 +955,7 @@ function drawUpgradeScreen() {
   ctx.strokeStyle=skipHighlighted?'#fff':'#666';ctx.lineWidth=skipHighlighted?2:1;
   ctx.shadowColor='#666';ctx.shadowBlur=skipHighlighted?10:0;
   ctx.fillStyle=hexAlpha('#666666',skipHighlighted?0.2:0.05);ctx.fillRect(skipX,skipY,skipW,skipH);ctx.strokeRect(skipX,skipY,skipW,skipH);ctx.shadowBlur=0;
-  drawNeonText(skipHighlighted?'[ SKIP - ENTER/ESC ]':'SKIP (ESC/Q)',W/2,skipY+18,11,skipHighlighted?COLORS.white:'#888888');
+  drawNeonText(skipHighlighted?'> SKIP (ENTER/ESC) <':'SKIP (ESC/Q)',W/2,skipY+18,11,skipHighlighted?COLORS.white:'#888888');
   if (mouseClicked&&skipHighlighted) gameState='playing';
   drawNeonText('Score: '+score,W/2,H-30,14,COLORS.yellow);
 }
@@ -941,6 +967,7 @@ function drawBossWarning() {
   const flash=Math.sin(warningTimer*0.15)>0;
   if (flash){drawNeonText('WARNING',W/2,H/2-40,48,COLORS.red);drawNeonText('BOSS APPROACHING',W/2,H/2+20,28,COLORS.orange);}
   drawNeonText('LEVEL '+level,W/2,H/2+70,20,COLORS.yellow);
+  drawNeonText('Press ENTER to skip',W/2,H/2+100,11,'#666666');
   warningTimer--; if(warningTimer<=0) gameState='playing';
 }
 
@@ -972,19 +999,20 @@ function drawMenu() {
   drawShip(W/2+Math.sin(t*2)*30,310+Math.sin(t*1.5)*10,demoShip,demoShip.color,1.5);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=400;
   const hover=mouseX>=btnX&&mouseX<=btnX+btnW&&mouseY>=btnY&&mouseY<=btnY+btnH;
-  ctx.strokeStyle=hover?'#fff':COLORS.cyan;ctx.lineWidth=hover?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=hover?20:10;
-  ctx.fillStyle=hexAlpha(COLORS.cyan,hover?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
-  drawNeonText('START GAME',W/2,btnY+25,20,COLORS.cyan);
+  const btnHighlighted = hover || menuBtnSelected;
+  ctx.strokeStyle=btnHighlighted?'#fff':COLORS.cyan;ctx.lineWidth=btnHighlighted?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=btnHighlighted?20:10;
+  ctx.fillStyle=hexAlpha(COLORS.cyan,btnHighlighted?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
+  drawNeonText(btnHighlighted?'> START GAME <':'START GAME',W/2,btnY+25,20,COLORS.cyan);
   drawNeonText('High Score: '+hiScore,W/2,500,14,COLORS.orange);
-  drawNeonText('Click anywhere to start music',W/2,535,11,'#666666');
+  drawNeonText('Press ENTER or SPACE to start',W/2,535,11,'#aaaaaa');
   drawNeonText('[M] Toggle Music  |  WASD/Arrows to Move',W/2,560,10,'#555555');
-  if (mouseClicked&&hover) { gameState='shipSelect'; shipHoverIdx=0; }
+  if (mouseClicked&&btnHighlighted) { gameState='shipSelect'; shipHoverIdx=0; }
 }
 
 function drawShipSelect() {
   drawBackground(); updateStars();
   drawNeonText('SELECT YOUR SHIP',W/2,50,32,COLORS.cyan);
-  drawNeonText('WASD / Arrow Keys to select — ENTER or SPACE to confirm',W/2,85,12,'#888888');
+  drawNeonText('W/A/S/D or Arrows to select  ·  ENTER to confirm',W/2,85,12,'#888888');
   const cardW=250,cardH=320,gap=30,startX=W/2-(cardW*1.5+gap);
   if (shipHoverIdx < 0) shipHoverIdx = 0;
   for (let i=0;i<3;i++) {
@@ -1004,7 +1032,7 @@ function drawShipSelect() {
     drawNeonText('Speed: '+def.speed,cx,cy+50,12,COLORS.cyan);
     drawNeonText('Armor: '+def.maxArmor,cx,cy+70,12,COLORS.orange);
     drawNeonText('Slots: '+def.weaponSlots,cx,cy+90,12,COLORS.green);
-    if (isSelected) drawNeonText('[ CLICK or ENTER ]',cx,cy+120,14,'#ffffff');
+    if (isSelected) drawNeonText('[ ENTER to select ]',cx,cy+120,14,'#ffffff');
   }
   if (mouseClicked && shipHoverIdx>=0) {
     player=createPlayer(shipHoverIdx);
@@ -1024,10 +1052,12 @@ function drawGameOver() {
   drawNeonText('Level Reached: '+level,W/2,H/2+75,16,COLORS.cyan);
   const btnW=200,btnH=50,btnX=W/2-btnW/2,btnY=H/2+110;
   const hover=mouseX>=btnX&&mouseX<=btnX+btnW&&mouseY>=btnY&&mouseY<=btnY+btnH;
-  ctx.strokeStyle=hover?'#fff':COLORS.cyan;ctx.lineWidth=hover?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=hover?20:10;
-  ctx.fillStyle=hexAlpha(COLORS.cyan,hover?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
-  drawNeonText('RETRY',W/2,btnY+25,20,COLORS.cyan);
-  if (mouseClicked&&hover) { gameState='shipSelect'; shipHoverIdx=0; }
+  const retryHighlighted = hover || gameOverBtnSelected;
+  ctx.strokeStyle=retryHighlighted?'#fff':COLORS.cyan;ctx.lineWidth=retryHighlighted?3:2;ctx.shadowColor=COLORS.cyan;ctx.shadowBlur=retryHighlighted?20:10;
+  ctx.fillStyle=hexAlpha(COLORS.cyan,retryHighlighted?0.2:0.05);ctx.fillRect(btnX,btnY,btnW,btnH);ctx.strokeRect(btnX,btnY,btnW,btnH);ctx.shadowBlur=0;
+  drawNeonText(retryHighlighted?'> RETRY <':'RETRY',W/2,btnY+25,20,COLORS.cyan);
+  drawNeonText('Press ENTER to retry',W/2,btnY+65,11,'#888888');
+  if (mouseClicked&&retryHighlighted) { gameState='shipSelect'; shipHoverIdx=0; }
 }
 
 // MAIN LOOP
